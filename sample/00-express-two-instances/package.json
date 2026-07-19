@@ -1,0 +1,14 @@
+{
+  "name": "nest-native-cache-sample-express",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Neutrality proof: two bare-Express processes kept cache-coherent by @stalefree/core's socket bus — no @nestjs/* anywhere",
+  "license": "MIT",
+  "scripts": {
+    "smoke": "node smoke.cjs"
+  },
+  "dependencies": {
+    "@stalefree/core": "0.0.0",
+    "express": "^5.1.0"
+  }
+}

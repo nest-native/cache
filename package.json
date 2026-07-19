@@ -8,7 +8,8 @@
     "node": ">=20"
   },
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "sample/*"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
@@ -37,7 +38,8 @@
     "test:mutation:full": "stryker run --force",
     "test:mutant": "TS_NODE_PROJECT=tsconfig.spec.json node --require ts-node/register --require reflect-metadata --test --test-force-exit packages/core/test/*.spec.ts",
     "test:integration:mutant": "TS_NODE_PROJECT=tsconfig.spec.json node --require ts-node/register --require reflect-metadata --test --test-force-exit packages/core/test/integration/*.spec.ts",
-    "test:mutant:full": "npm run test:mutant && STALEFREE_POSTGRES_URL=postgres://stalefree:stalefree@127.0.0.1:54331/stalefree STALEFREE_MYSQL_URL=mysql://stalefree:stalefree@127.0.0.1:33071/stalefree npm run test:integration:mutant"
+    "test:mutant:full": "npm run test:mutant && STALEFREE_POSTGRES_URL=postgres://stalefree:stalefree@127.0.0.1:54331/stalefree STALEFREE_MYSQL_URL=mysql://stalefree:stalefree@127.0.0.1:33071/stalefree npm run test:integration:mutant",
+    "sample": "npm run build --workspace @stalefree/core && node sample/00-express-two-instances/smoke.cjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.3",

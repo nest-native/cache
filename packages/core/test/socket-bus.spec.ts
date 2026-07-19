@@ -92,15 +92,28 @@ describe('SocketInvalidationBus', () => {
     assert.equal(seen.length, 1);
   });
 
-  test('recovers a stale socket file left by a crashed hub', async () => {
+  test('recovers a stale socket file left by a crashed hub (after a confirming retry)', async () => {
     const path = socketPath();
     writeFileSync(path, ''); // dead filesystem entry occupying the path
     const errors: unknown[] = [];
-    const bus = await startBus({ path, onError: (e) => errors.push(e) });
+    // Cycle 1: bind refused + connect refused → streak 1 (no unlink yet — it
+    // could be a hub mid-listen). Cycle 2 (after the delay): still refused →
+    // reclaim the path and bind. Prove it by connecting a live peer.
+    const bus = await startBus({ path, reconnectDelayMs: 25, onError: (e) => errors.push(e) });
     const seen: InvalidationMessage[] = [];
     bus.subscribe((m) => seen.push(m));
     bus.publish({ tags: ['ok'] });
-    assert.equal(seen.length, 1, 'became hub on the recovered path');
+    assert.equal(seen.length, 1, 'local dispatch works even before recovery');
+    await until(() => {
+      return errors.length >= 1; // the reclaim reports the refused connect
+    }, 'path reclaimed');
+    const peer = await startBus({ path, reconnectDelayMs: 25 });
+    const peerSeen: InvalidationMessage[] = [];
+    peer.subscribe((m) => peerSeen.push(m));
+    await until(() => {
+      bus.publish({ tags: ['post-recovery'] }); // repeat: peer may still be attaching
+      return peerSeen.length >= 1;
+    }, 'a live peer joins the recovered hub');
   });
 
   test('re-election: when the hub dies, a peer takes over and delivery resumes', async () => {

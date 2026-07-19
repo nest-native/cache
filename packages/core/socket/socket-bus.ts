@@ -95,21 +95,41 @@ export class SocketInvalidationBus implements InvalidationBus {
     }
   }
 
+  #refusedStreak = 0;
+
   /** One role lifetime; `ended` settles when the role ends. */
   async #attach(): Promise<{ ended: Promise<void> }> {
     try {
-      return await this.#becomeHub();
+      const role = await this.#becomeHub();
+      this.#refusedStreak = 0;
+      return role;
     } catch (error) {
       if (!isAddrInUse(error)) {
         throw error;
       }
       try {
-        return await this.#becomePeer();
+        const role = await this.#becomePeer();
+        this.#refusedStreak = 0;
+        return role;
       } catch (peerError) {
-        // Neither bind nor connect: likely a stale file from a crashed hub.
-        this.#options.onError?.(peerError);
-        tryUnlink(this.#options.path);
-        return await this.#becomeHub();
+        // Bind refused AND connect refused. Either a stale file from a crashed
+        // hub — or a LIVE hub that simply hasn't finished listen() yet (two
+        // processes racing to start). Unlinking on the first failure would
+        // yank a live hub's socket out from under it and split the mesh into
+        // two disjoint hubs, so the path is reclaimed only after consecutive
+        // refused cycles: a dead file keeps refusing; a mid-listen hub
+        // accepts on the retry.
+        this.#refusedStreak += 1;
+        if (this.#refusedStreak >= 2) {
+          // Confirmed dead: unlink, then RETRY THE DANCE rather than binding
+          // here. Racing recoverers all funnel through bind-or-connect on the
+          // next cycle — whoever binds first wins and the rest connect to it,
+          // instead of a late reclaimer yanking a freshly bound live socket.
+          this.#refusedStreak = 0;
+          this.#options.onError?.(peerError);
+          tryUnlink(this.#options.path);
+        }
+        throw peerError; // supervise sleeps and re-runs the whole dance
       }
     }
   }
