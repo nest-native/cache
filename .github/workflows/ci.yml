@@ -1,0 +1,261 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  package-build:
+    name: Package build/typecheck (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['20', '22']
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Build the core first so the adapter resolves its emitted types.
+      - name: Build core (@stalefree/core)
+        run: npm run build --workspace @stalefree/core
+
+      - name: Build adapter (@nest-native/cache)
+        run: npm run build --workspace @nest-native/cache
+
+      - name: Typecheck core
+        run: npm run typecheck --workspace @stalefree/core
+
+      - name: Typecheck adapter
+        run: npm run typecheck --workspace @nest-native/cache
+
+  package-test-node-20:
+    name: Package tests/coverage (Node 20)
+    runs-on: ubuntu-latest
+    # No external DB services: the core suite is fully hermetic (in-memory
+    # store + in-process bus), and the gated store/bus round-trips live in
+    # store-integration.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run core tests with coverage
+        run: npm run test:cov
+
+      # The adapter tests import `@stalefree/core` by package name, which
+      # resolves to packages/core/dist — build it first.
+      - name: Build core (@stalefree/core)
+        run: npm run build --workspace @stalefree/core
+
+      - name: Run adapter tests
+        run: npm run test:nestjs
+
+  package-quality:
+    name: Tests, coverage, and complexity (Node 22)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run core tests with coverage
+        run: |
+          START=$SECONDS
+          npm run test:cov
+          echo $(( (SECONDS - START) * 1000 )) > test-step-duration-ms.txt
+
+      # The adapter tests import `@stalefree/core` by package name, which
+      # resolves to packages/core/dist — build it first.
+      - name: Build core (@stalefree/core)
+        run: npm run build --workspace @stalefree/core
+
+      - name: Run adapter tests
+        run: npm run test:nestjs
+
+      - name: Enforce cognitive complexity threshold
+        run: npm run complexity:check
+
+      - name: Generate cognitive complexity report
+        run: npm run complexity:report
+
+      - name: Coverage and performance summary
+        run: |
+          node -e "
+          const fs = require('node:fs');
+          const summary = JSON.parse(fs.readFileSync('coverage/coverage-summary.json', 'utf8')).total;
+          const duration = fs.readFileSync('test-step-duration-ms.txt', 'utf8').trim();
+          const metrics = {
+            statements: summary.statements.pct,
+            branches: summary.branches.pct,
+            functions: summary.functions.pct,
+            lines: summary.lines.pct,
+          };
+          const report = [
+            '### Package Quality',
+            '',
+            '| Metric | Value |',
+            '| :--- | ---: |',
+            '| Statements | ' + metrics.statements + '% |',
+            '| Branches | ' + metrics.branches + '% |',
+            '| Functions | ' + metrics.functions + '% |',
+            '| Lines | ' + metrics.lines + '% |',
+            '| Test step duration | ' + duration + ' ms |',
+          ].join('\n');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, report + '\n');
+          "
+
+      - name: Upload quality artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-quality
+          path: |
+            coverage/coverage-summary.json
+            coverage/lcov.info
+            complexity/cognitive-complexity-summary.json
+            test-results.json
+            test-step-duration-ms.txt
+          if-no-files-found: error
+
+  store-integration:
+    name: Store integration (real Postgres + MySQL)
+    runs-on: ubuntu-latest
+    # The only job with DB services: it runs the gated store/bus round-trips
+    # (test/integration), which skip everywhere else because
+    # STALEFREE_POSTGRES_URL and STALEFREE_MYSQL_URL are unset. The main suite
+    # stays hermetic.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: stalefree
+          POSTGRES_USER: stalefree
+          POSTGRES_PASSWORD: stalefree
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U stalefree -d stalefree"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: stalefree
+          MYSQL_ROOT_PASSWORD: stalefree-ci-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pstalefree-ci-password"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run gated store round-trips
+        run: npm run test:integration
+        env:
+          STALEFREE_POSTGRES_URL: postgres://stalefree:stalefree@127.0.0.1:5432/stalefree
+          STALEFREE_MYSQL_URL: mysql://root:stalefree-ci-password@127.0.0.1:3306/stalefree
+
+  nestjs-compat:
+    name: NestJS ${{ matrix.nest-major }} backward-compat (adapter typecheck)
+    runs-on: ubuntu-latest
+    # The adapter builds only on stable Nest primitives (DynamicModule and
+    # plain injectable providers), so it must typecheck against every
+    # supported major. Becomes fully meaningful once CacheModule/CacheService
+    # land.
+    strategy:
+      fail-fast: false
+      matrix:
+        nest-major: ['10', '11']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Pin NestJS to major ${{ matrix.nest-major }}
+        run: npm install --no-save --workspace @nest-native/cache "@nestjs/common@^${{ matrix.nest-major }}" "@nestjs/core@^${{ matrix.nest-major }}"
+
+      - name: Build core (@stalefree/core)
+        run: npm run build --workspace @stalefree/core
+
+      - name: Typecheck adapter against NestJS ${{ matrix.nest-major }}
+        run: npm run typecheck --workspace @nest-native/cache
+
+  nestjs-canary:
+    name: NestJS 12-alpha canary (informational)
+    runs-on: ubuntu-latest
+    # Gated, informational: tracks the next NestJS major before it is stable.
+    # continue-on-error so a breaking pre-release never blocks a merge.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Pin NestJS to the 12 pre-release line
+        run: npm install --no-save --workspace @nest-native/cache "@nestjs/common@12 || @nestjs/common@^12.0.0-0" "@nestjs/core@12 || @nestjs/core@^12.0.0-0"
+
+      - name: Build core (@stalefree/core)
+        run: npm run build --workspace @stalefree/core
+
+      - name: Typecheck adapter against NestJS 12-alpha
+        run: npm run typecheck --workspace @nest-native/cache
+
+  release-and-security:
+    name: Release and security checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate package tarball
+        run: npm run release:check
+
+      - name: Audit production supply chain
+        run: npm run security:audit

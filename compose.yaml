@@ -1,0 +1,43 @@
+# Optional local infrastructure for the gated Postgres + MySQL specs.
+# Nothing in the default `npm test` path needs this — forks work without Docker,
+# and CI provisions its own database services for the dedicated integration job.
+# See GUIDELINES_NEST_CACHE.md, "Local full-mode verification".
+#
+#   npm run infra:up     start + wait for health
+#   npm run test:full    run the suite with the gated store specs enabled
+#   npm run infra:down   remove containers and volumes
+#
+# Host ports are deliberately non-default (54331 / 33071) so this stack can run
+# alongside other nest-native repos' compose stacks without colliding
+# (lockout uses 54329/33069, messaging 54322/33062).
+services:
+  postgres:
+    image: postgres:16
+    container_name: nest-stalefree-postgres
+    environment:
+      POSTGRES_DB: stalefree
+      POSTGRES_USER: stalefree
+      POSTGRES_PASSWORD: stalefree
+    ports:
+      - '127.0.0.1:54331:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U stalefree -d stalefree']
+      interval: 2s
+      timeout: 3s
+      retries: 60
+
+  mysql:
+    image: mysql:8.4
+    container_name: nest-stalefree-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: stalefree
+      MYSQL_DATABASE: stalefree
+      MYSQL_USER: stalefree
+      MYSQL_PASSWORD: stalefree
+    ports:
+      - '127.0.0.1:33071:3306'
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', '127.0.0.1', '-pstalefree']
+      interval: 2s
+      timeout: 3s
+      retries: 60

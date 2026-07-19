@@ -27,8 +27,43 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./socket": {
+      "types": "./dist/socket/index.d.ts",
+      "require": "./dist/socket/index.js",
+      "default": "./dist/socket/index.js"
+    },
+    "./postgres": {
+      "types": "./dist/postgres/index.d.ts",
+      "require": "./dist/postgres/index.js",
+      "default": "./dist/postgres/index.js"
+    },
+    "./sqlite": {
+      "types": "./dist/sqlite/index.d.ts",
+      "require": "./dist/sqlite/index.js",
+      "default": "./dist/sqlite/index.js"
+    },
+    "./mysql": {
+      "types": "./dist/mysql/index.d.ts",
+      "require": "./dist/mysql/index.js",
+      "default": "./dist/mysql/index.js"
+    }
+  },
   "engines": {
     "node": ">=20"
+  },
+  "peerDependencies": {
+    "drizzle-orm": "^0.44.0 || ^0.45.0"
+  },
+  "peerDependenciesMeta": {
+    "drizzle-orm": {
+      "optional": true
+    }
   },
   "scripts": {
     "clean": "rimraf dist tsconfig.tsbuildinfo",

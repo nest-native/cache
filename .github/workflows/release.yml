@@ -1,0 +1,71 @@
+name: Release
+
+# Publishes on a `vX.Y.Z` tag. Both packages are published from the same tag,
+# core first (the adapter depends on it). If independent per-package versioning
+# is adopted later, split this into tag-prefixed workflows
+# (`stalefree-core-v*` / `nest-native-cache-v*`).
+#
+# Publishing uses npm TRUSTED PUBLISHING (OIDC) — no long-lived NPM_TOKEN. The
+# `id-token: write` permission lets the npm CLI mint a short-lived, workflow-
+# scoped credential and attach provenance automatically. This sidesteps npm's
+# restriction on tokens that bypass 2FA (account changes Aug 2026, direct
+# publishing Jan 2027). Each package must have a Trusted Publisher configured on
+# npmjs.com pointing at this repo (`nest-native/cache`) and this workflow
+# (`.github/workflows/release.yml`) before its first OIDC release.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      # Trusted publishing (OIDC) needs a recent npm; the version bundled with
+      # Node 22 predates it.
+      - name: Ensure an OIDC-capable npm
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build core (@stalefree/core)
+        run: npm run build --workspace @stalefree/core
+
+      # No NODE_AUTH_TOKEN — the npm CLI uses the OIDC id-token from the trusted
+      # publisher; `--provenance` is passed explicitly (the "automatic"
+      # provenance has been reported not to kick in without it). Each publish is
+      # idempotent: if the version is already on the registry (a manual
+      # bootstrap publish, or a re-run after a partial failure), it is skipped
+      # so the run stays green instead of failing on a publish-over conflict.
+      - name: Publish core to npm (OIDC + provenance)
+        run: |
+          VERSION="$(node -p "require('./packages/core/package.json').version")"
+          if npm view "@stalefree/core@${VERSION}" version >/dev/null 2>&1; then
+            echo "@stalefree/core@${VERSION} is already on the registry — skipping."
+          else
+            npm publish --workspace @stalefree/core --provenance --access public
+          fi
+
+      - name: Build adapter (@nest-native/cache)
+        run: npm run build --workspace @nest-native/cache
+
+      - name: Publish adapter to npm (OIDC + provenance)
+        run: |
+          VERSION="$(node -p "require('./packages/nestjs/package.json').version")"
+          if npm view "@nest-native/cache@${VERSION}" version >/dev/null 2>&1; then
+            echo "@nest-native/cache@${VERSION} is already on the registry — skipping."
+          else
+            npm publish --workspace @nest-native/cache --provenance --access public
+          fi
