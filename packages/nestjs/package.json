@@ -1,0 +1,50 @@
+{
+  "name": "@nest-native/cache",
+  "version": "0.0.0",
+  "description": "NestJS adapter for @stalefree/core — tag-based cache invalidation through the database you already have; no Redis",
+  "keywords": [
+    "nestjs",
+    "cache",
+    "cache-invalidation",
+    "tags",
+    "postgres",
+    "listen-notify",
+    "no-redis",
+    "drizzle",
+    "typescript"
+  ],
+  "author": "Rodrigo Nogueira",
+  "license": "MIT",
+  "homepage": "https://github.com/nest-native/cache#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nest-native/cache.git",
+    "directory": "packages/nestjs"
+  },
+  "bugs": {
+    "url": "https://github.com/nest-native/cache/issues"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "clean": "rimraf dist tsconfig.tsbuildinfo",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@stalefree/core": "0.0.0"
+  },
+  "peerDependencies": {
+    "@nestjs/common": "^10.0.0 || ^11.0.0 || ^12.0.0",
+    "@nestjs/core": "^10.0.0 || ^11.0.0 || ^12.0.0",
+    "reflect-metadata": "^0.1.12 || ^0.2.0",
+    "rxjs": "^7.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
+}

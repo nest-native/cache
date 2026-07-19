@@ -1,0 +1,18 @@
+{
+  "name": "nest-native-cache-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Workspace for @stalefree/core (framework-agnostic tag-based cache invalidation through your database) and @nest-native/cache (the NestJS adapter)",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "TS_NODE_PROJECT=tsconfig.spec.json node --require ts-node/register --require reflect-metadata --test packages/core/test/*.spec.ts"
+  }
+}
