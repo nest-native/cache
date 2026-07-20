@@ -209,7 +209,10 @@ jobs:
         run: npm ci
 
       - name: Pin NestJS to major ${{ matrix.nest-major }}
-        run: npm install --no-save --workspace @nest-native/cache "@nestjs/common@^${{ matrix.nest-major }}" "@nestjs/core@^${{ matrix.nest-major }}"
+        # All four @nestjs packages move together: the root devDeps carry
+        # platform-express/testing at ^11, and pinning only common/core makes
+        # their peer ranges unresolvable (ERESOLVE) on the 10 lane.
+        run: npm install --no-save "@nestjs/common@^${{ matrix.nest-major }}" "@nestjs/core@^${{ matrix.nest-major }}" "@nestjs/platform-express@^${{ matrix.nest-major }}" "@nestjs/testing@^${{ matrix.nest-major }}"
 
       - name: Build core (@stalefree/core)
         run: npm run build --workspace @stalefree/core
