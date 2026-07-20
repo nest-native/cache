@@ -1,4 +1,4 @@
-import { unlinkSync } from 'node:fs';
+import { statSync, unlinkSync } from 'node:fs';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import type { InvalidationBus, InvalidationMessage } from '../interfaces';
 
@@ -13,15 +13,25 @@ import type { InvalidationBus, InvalidationMessage } from '../interfaces';
  * dispatched to the publisher's own subscribers, sent to the hub, and
  * re-broadcast by the hub to every other connection. If the hub dies, each
  * peer re-runs the bind-or-connect dance after `reconnectDelayMs` — the first
- * to bind is the new hub (stale socket files from a crashed hub are detected
- * by a probe connect and unlinked, the WakeSocket pattern). Frames lost during
- * a re-election are NOT recovered: the TTL backstop bounds the staleness, the
- * same contract as every stalefree bus.
+ * to bind is the new hub. A stale socket file from a crashed hub is reclaimed
+ * only after TWO consecutive refused cycles (a live hub mid-listen also
+ * refuses briefly), and reclaiming unlinks then RETRIES the dance rather than
+ * binding blindly — racing recoverers funnel through bind-or-connect, so one
+ * of them wins and the rest connect to it. As a last line of defense the hub
+ * self-checks its socket file's inode every few cycles and resigns if the
+ * path was yanked from under it (re-election heals what any residual race
+ * breaks; nothing is ever stranded silently).
  *
- * Wire format: newline-delimited JSON `InvalidationMessage` frames. A frame
- * larger than `MAX_FRAME_BYTES` marks a broken producer — the connection is
- * dropped (values never travel on this bus; only keys/tags do, and both are
- * length-capped, so legitimate frames are small).
+ * Frames lost during a re-election are NOT recovered: the TTL backstop bounds
+ * the staleness, the same contract as every stalefree bus. A frame too large
+ * for the wire degrades ON THE SEND SIDE to `{ clear: true }` — the receivers
+ * evict everything (colder cache, never staler data).
+ *
+ * Wire format: newline-delimited JSON `InvalidationMessage` frames.
+ *
+ * Security note: any local process that can reach the socket path can publish
+ * evictions (worst case: a cold cache). Place the socket in a directory only
+ * your app's user can access (e.g. mode 0700), not a world-writable /tmp.
  */
 export interface SocketBusOptions {
   /** Unix-socket path (Windows: a `\\.\pipe\` name). Same value in every process. */
@@ -33,6 +43,8 @@ export interface SocketBusOptions {
 }
 
 const MAX_FRAME_BYTES = 65_536;
+// Degrade to {clear:true} before the receiver-side cap can ever trigger.
+const MAX_SEND_BYTES = 60_000;
 
 export class SocketInvalidationBus implements InvalidationBus {
   readonly #handlers = new Set<(message: InvalidationMessage) => void>();
@@ -45,6 +57,8 @@ export class SocketInvalidationBus implements InvalidationBus {
   #started = false;
   #abortSleep: (() => void) | null = null;
   #supervision: Promise<void> | null = null;
+  #refusedStreak = 0;
+  #attached: Promise<void> = Promise.resolve();
 
   constructor(options: SocketBusOptions) {
     this.#options = options;
@@ -66,13 +80,37 @@ export class SocketInvalidationBus implements InvalidationBus {
     }
     this.#started = true;
     this.#supervision = this.#supervise();
-    // Give the first attach attempt a chance to settle so callers that await
-    // start() publish into a connected mesh; later re-elections happen in the
-    // background.
+    // Await the first attach attempt so callers publish into a connected mesh
+    // when startup is orderly; later re-elections happen in the background.
     await this.#attached;
   }
 
-  #attached: Promise<void> = Promise.resolve();
+  publish(message: InvalidationMessage): void {
+    // Local subscribers always hear the precise message (two caches in one
+    // process stay coherent even mid-re-election); the wire may degrade.
+    this.#dispatch(message);
+    const frame = toWireFrame(message);
+    if (this.#server) {
+      this.#fanOut(frame, null);
+      return;
+    }
+    this.#peer?.write(frame, this.onWriteError);
+  }
+
+  subscribe(handler: (message: InvalidationMessage) => void): () => void {
+    this.#handlers.add(handler);
+    return () => {
+      this.#handlers.delete(handler);
+    };
+  }
+
+  async close(): Promise<void> {
+    this.#stopped = true;
+    this.#abortSleep?.();
+    await this.#teardownRole();
+    await this.#supervision;
+    this.#handlers.clear();
+  }
 
   async #supervise(): Promise<void> {
     while (!this.#stopped) {
@@ -80,10 +118,17 @@ export class SocketInvalidationBus implements InvalidationBus {
       this.#attached = new Promise((resolve) => (resolveAttached = resolve));
       try {
         // The role's end-signal travels WRAPPED in an object: an async
-        // function resolving with a bare promise would flatten it, making
-        // this await block until the role ENDS — start() would hang forever.
+        // function resolving a bare promise flattens it (this await would
+        // then block until the role ENDED and start() would hang).
         const { ended } = await this.#attach();
         resolveAttached();
+        if (this.#stopped) {
+          // close() ran while the attach was in flight and found no role to
+          // tear down — tear down the one that just landed, or it becomes a
+          // zombie hub holding the path and close() hangs on `ended` forever.
+          await this.#teardownRole();
+          return;
+        }
         await ended; // holds until this role ends (hub closed / peer dropped)
       } catch (error) {
         resolveAttached();
@@ -94,8 +139,6 @@ export class SocketInvalidationBus implements InvalidationBus {
       }
     }
   }
-
-  #refusedStreak = 0;
 
   /** One role lifetime; `ended` settles when the role ends. */
   async #attach(): Promise<{ ended: Promise<void> }> {
@@ -112,19 +155,11 @@ export class SocketInvalidationBus implements InvalidationBus {
         this.#refusedStreak = 0;
         return role;
       } catch (peerError) {
-        // Bind refused AND connect refused. Either a stale file from a crashed
-        // hub — or a LIVE hub that simply hasn't finished listen() yet (two
-        // processes racing to start). Unlinking on the first failure would
-        // yank a live hub's socket out from under it and split the mesh into
-        // two disjoint hubs, so the path is reclaimed only after consecutive
-        // refused cycles: a dead file keeps refusing; a mid-listen hub
-        // accepts on the retry.
+        // Bind refused AND connect refused: a stale file from a crashed hub —
+        // or a live hub that hasn't finished listen() yet. Reclaim only after
+        // consecutive refusals, and RETRY the dance instead of binding here.
         this.#refusedStreak += 1;
         if (this.#refusedStreak >= 2) {
-          // Confirmed dead: unlink, then RETRY THE DANCE rather than binding
-          // here. Racing recoverers all funnel through bind-or-connect on the
-          // next cycle — whoever binds first wins and the rest connect to it,
-          // instead of a late reclaimer yanking a freshly bound live socket.
           this.#refusedStreak = 0;
           this.#options.onError?.(peerError);
           tryUnlink(this.#options.path);
@@ -140,22 +175,50 @@ export class SocketInvalidationBus implements InvalidationBus {
       server.once('error', reject);
       server.listen(this.#options.path, () => {
         server.removeListener('error', reject);
+        // A post-listen server error (EMFILE under fd exhaustion, …) must
+        // resign the role for re-election, never crash the process.
+        server.on('error', this.onServerError);
         this.#server = server;
+        const inode = tryInode(this.#options.path);
+        const selfCheck = setInterval(
+          () => this.#verifyHubOwnership(server, inode),
+          this.#reconnectDelayMs * 5,
+        );
+        selfCheck.unref?.();
         const ended = new Promise<void>((resolveEnd) => {
-          server.once('close', () => resolveEnd());
+          server.once('close', () => {
+            clearInterval(selfCheck);
+            resolveEnd();
+          });
         });
         resolve({ ended });
       });
     });
   }
 
+  /**
+   * The stranded-hub defense: if the socket file was unlinked or replaced (a
+   * residual reclaim race), this hub is bound to an invisible inode — new
+   * peers can never reach it and the partition would otherwise be permanent.
+   * Resigning closes the server, which ends the role and re-runs the election.
+   */
+  #verifyHubOwnership(server: Server, inode: number | null): void {
+    if (tryInode(this.#options.path) !== inode) {
+      this.#options.onError?.(
+        new Error('socket-bus hub lost its socket path; resigning for re-election'),
+      );
+      server.close();
+      this.#server = null;
+    }
+  }
+
   #onHubConnection(socket: Socket): void {
     this.#hubConnections.add(socket);
-    socket.once('error', () => socket.destroy());
+    socket.on('error', () => socket.destroy());
     socket.once('close', () => this.#hubConnections.delete(socket));
     readFrames(socket, this.#options.onError, (message) => {
       this.#dispatch(message);
-      this.#fanOut(message, socket);
+      this.#fanOut(toWireFrame(message), socket);
     });
   }
 
@@ -171,7 +234,7 @@ export class SocketInvalidationBus implements InvalidationBus {
             this.#peer = null;
             resolveEnd();
           });
-          socket.once('error', () => socket.destroy());
+          socket.on('error', () => socket.destroy());
         });
         readFrames(socket, this.#options.onError, (message) =>
           this.#dispatch(message),
@@ -181,31 +244,26 @@ export class SocketInvalidationBus implements InvalidationBus {
     });
   }
 
-  publish(message: InvalidationMessage): void {
-    // Local subscribers always hear it (two caches in one process must stay
-    // coherent even while the mesh is re-electing).
-    this.#dispatch(message);
-    const frame = JSON.stringify(message) + '\n';
-    if (this.#server) {
-      this.#fanOut(message, null);
-      return;
-    }
-    this.#peer?.write(frame, this.onWriteError);
-  }
-
   // TS-private (not #) so the write-failure branch is unit-testable directly —
   // a mid-teardown write error is not deterministically triggerable over a
-  // real socket (the wake-socket precedent). A failed frame write only costs
-  // staleness-until-TTL on the missed instances.
+  // real socket. A failed frame write costs staleness-until-TTL, nothing more.
   private readonly onWriteError = (error?: Error | null): void => {
     if (error) {
       this.#options.onError?.(error);
     }
   };
 
-  /** Hub-side: send to every connection except the origin (it already applied). */
-  #fanOut(message: InvalidationMessage, origin: Socket | null): void {
-    const frame = JSON.stringify(message) + '\n';
+  // TS-private for the same reason: EMFILE-class post-listen server errors
+  // are not deterministically triggerable in a test. Resigning closes the
+  // server, which ends the role and re-runs the election.
+  private readonly onServerError = (error: unknown): void => {
+    this.#options.onError?.(error);
+    this.#server?.close();
+    this.#server = null;
+  };
+
+  /** Hub-side: send a frame to every connection except the origin. */
+  #fanOut(frame: string, origin: Socket | null): void {
     for (const connection of this.#hubConnections) {
       if (connection !== origin) {
         connection.write(frame, this.onWriteError);
@@ -213,16 +271,17 @@ export class SocketInvalidationBus implements InvalidationBus {
     }
   }
 
-  subscribe(handler: (message: InvalidationMessage) => void): () => void {
-    this.#handlers.add(handler);
-    return () => {
-      this.#handlers.delete(handler);
-    };
+  #dispatch(message: InvalidationMessage): void {
+    for (const handler of [...this.#handlers]) {
+      try {
+        handler(message);
+      } catch {
+        // Subscriber errors never break the bus (idempotent evictions + TTL).
+      }
+    }
   }
 
-  async close(): Promise<void> {
-    this.#stopped = true;
-    this.#abortSleep?.();
+  async #teardownRole(): Promise<void> {
     const server = this.#server;
     if (server) {
       for (const connection of this.#hubConnections) {
@@ -235,18 +294,6 @@ export class SocketInvalidationBus implements InvalidationBus {
     }
     this.#peer?.destroy();
     this.#peer = null;
-    await this.#supervision;
-    this.#handlers.clear();
-  }
-
-  #dispatch(message: InvalidationMessage): void {
-    for (const handler of [...this.#handlers]) {
-      try {
-        handler(message);
-      } catch {
-        // Subscriber errors never break the bus (idempotent evictions + TTL).
-      }
-    }
   }
 
   #sleep(ms: number): Promise<void> {
@@ -264,7 +311,18 @@ export class SocketInvalidationBus implements InvalidationBus {
   }
 }
 
-/** Attach an NDJSON frame reader with a max-size guard to a socket. */
+/** Serialize for the wire, degrading oversized messages to a full clear. */
+function toWireFrame(message: InvalidationMessage): string {
+  const frame = JSON.stringify(message) + '\n';
+  if (frame.length > MAX_SEND_BYTES) {
+    // Colder, never staler: receivers evict everything instead of the frame
+    // being destroyed at the receiver and the invalidation never arriving.
+    return JSON.stringify({ clear: true }) + '\n';
+  }
+  return frame;
+}
+
+/** Attach an NDJSON frame reader (with a partial-frame size guard) to a socket. */
 function readFrames(
   socket: Socket,
   onError: ((error: unknown) => void) | undefined,
@@ -273,11 +331,6 @@ function readFrames(
   let buffer = '';
   socket.on('data', (chunk) => {
     buffer += chunk.toString('utf8');
-    if (buffer.length > MAX_FRAME_BYTES) {
-      onError?.(new Error('socket-bus frame exceeds the size cap'));
-      socket.destroy();
-      return;
-    }
     let newline = buffer.indexOf('\n');
     while (newline !== -1) {
       const raw = buffer.slice(0, newline);
@@ -288,6 +341,13 @@ function readFrames(
         onError?.(error); // malformed frame: drop it, keep the connection
       }
       newline = buffer.indexOf('\n');
+    }
+    // The cap applies to the RESIDUAL (one partial frame) — checking the
+    // undrained buffer before splitting would kill a healthy connection
+    // delivering a burst of small frames in one chunk.
+    if (buffer.length > MAX_FRAME_BYTES) {
+      onError?.(new Error('socket-bus frame exceeds the size cap'));
+      socket.destroy();
     }
   });
 }
@@ -301,5 +361,13 @@ function tryUnlink(path: string): void {
     unlinkSync(path);
   } catch {
     // Already gone, or a Windows pipe name with no filesystem entry.
+  }
+}
+
+function tryInode(path: string): number | null {
+  try {
+    return statSync(path).ino;
+  } catch {
+    return null; // unlinked (or a Windows pipe with no filesystem entry)
   }
 }

@@ -61,8 +61,11 @@ describe('MySQL store round-trip (real service)', { skip: !MYSQL_URL }, () => {
     const { drizzle } = await import('drizzle-orm/mysql2');
     connection = await mysql.createConnection(MYSQL_URL as string);
     await connection.query('DROP TABLE IF EXISTS stalefree_cache');
+    // COLLATE utf8mb4_bin is the documented, REQUIRED migration edit: MySQL's
+    // default collation is case-insensitive and would collide case-distinct
+    // keys (a wrong-value serve, not staleness).
     await connection.query(
-      'CREATE TABLE stalefree_cache (`key` VARCHAR(191) PRIMARY KEY, value TEXT NOT NULL, expires_at BIGINT NOT NULL, tags TEXT NOT NULL)',
+      'CREATE TABLE stalefree_cache (`key` VARCHAR(191) COLLATE utf8mb4_bin PRIMARY KEY, value TEXT NOT NULL, expires_at BIGINT NOT NULL, tags TEXT NOT NULL)',
     );
     store = new MysqlCacheStore(
       drizzle(connection as never, { mode: 'default' }),
@@ -85,5 +88,13 @@ describe('MySQL store round-trip (real service)', { skip: !MYSQL_URL }, () => {
     await store.set('stale', entry('x', 1, []));
     await store.prune(2);
     assert.equal(await store.get('stale'), undefined);
+  });
+  test('case-distinct keys stay distinct under the documented binary collation', async () => {
+    await store.set('Case:1', entry('upper', 5_000, []));
+    await store.set('case:1', entry('lower', 5_000, []));
+    assert.equal((await store.get('Case:1'))?.value, 'upper');
+    assert.equal((await store.get('case:1'))?.value, 'lower');
+    await store.delete('Case:1');
+    assert.equal((await store.get('case:1'))?.value, 'lower', 'sibling untouched');
   });
 });

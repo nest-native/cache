@@ -25,6 +25,10 @@ const NO_TAGS: readonly string[] = Object.freeze([]);
  *   errors are the caller's business and propagate untouched.
  * - **TTL is mandatory** (per call or via `defaultTtlMs`) — the delivery
  *   backstop that turns any lost invalidation into stale-until-TTL.
+ * - **Values are held BY REFERENCE in L1.** Treat cached values as immutable:
+ *   mutating a returned object mutates the cache for every later hit (until
+ *   an L2 round-trip re-serializes it — making the corruption tier-dependent
+ *   and maddening to debug). Clone before mutating.
  */
 export class StalefreeCache {
   readonly #l1: L1Cache;
@@ -112,6 +116,11 @@ export class StalefreeCache {
    * concurrent callers for the same key share ONE loader run. An `undefined`
    * loader result is returned but NOT cached (indistinguishable from a miss).
    * Loader errors propagate to every joined caller and cache nothing.
+   *
+   * ⚠ Do NOT call `wrap` for the SAME key from inside its own loader (even
+   * transitively through other services): the inner call joins the outer
+   * in-flight promise and both deadlock. Single-flight has no re-entrancy
+   * detection — structure loaders to read from the source, not the cache.
    */
   async wrap<T>(
     key: string,
@@ -119,6 +128,12 @@ export class StalefreeCache {
     options: SetOptions = {},
   ): Promise<T> {
     assertValidKey(key);
+    // Validate policy UP FRONT: a bad TTL/tag must fail fast and
+    // deterministically — not run the loader first and then reject with an
+    // error the caller can't tell from a loader failure (and not pass
+    // silently whenever the read happens to be a hit).
+    assertValidTtl(options.ttlMs ?? this.#defaultTtlMs);
+    assertValidTags(options.tags ?? NO_TAGS);
     const joined = this.#inflight.get(key);
     if (joined) {
       return joined as Promise<T>;

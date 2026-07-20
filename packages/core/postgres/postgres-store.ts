@@ -63,6 +63,32 @@ export class PostgresCacheStore implements CacheStore {
     }
   }
 
+  /**
+   * The transactional partner of `PostgresInvalidationBus.publishInTx` — and
+   * MANDATORY alongside it when this L2 store is configured. The bus message
+   * only evicts L1s; without deleting the L2 rows in the same transaction,
+   * every instance's next read would refill its L1 from the stale L2 row and
+   * the transactional invalidation would be a de-facto no-op:
+   *
+   * ```ts
+   * await db.transaction(async (tx) => {
+   *   await tx.update(projects)...;                       // the business write
+   *   await store.invalidateTagsInTx(tx, tags);           // L2 dies with the commit
+   *   await bus.publishInTx(tx, { tags });                // L1s evict on commit
+   * });
+   * ```
+   */
+  async invalidateTagsInTx(
+    tx: { execute(query: unknown): Promise<unknown> },
+    tags: readonly string[],
+  ): Promise<void> {
+    for (const tag of tags) {
+      await tx.execute(
+        sql`DELETE FROM ${this.table} WHERE ${this.table.tags} LIKE ${tagLikePattern(tag)} ESCAPE '!'`,
+      );
+    }
+  }
+
   async prune(now: number): Promise<void> {
     await (this.db as Db).delete(this.table).where(lte(this.table.expiresAt, now));
   }

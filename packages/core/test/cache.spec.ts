@@ -226,6 +226,29 @@ describe('StalefreeCache.wrap', () => {
     assert.equal(await cache.wrap('k', () => 'recovered'), 'recovered');
   });
 
+  test('wrap validates TTL/tags UP FRONT — before the loader, and on hits too', async () => {
+    const cache = new StalefreeCache({ clock: fakeClock().now });
+    let loaderRan = false;
+    // Missing TTL (no default): must reject without running the loader.
+    await assert.rejects(
+      () =>
+        cache.wrap('k', () => {
+          loaderRan = true;
+          return 'v';
+        }),
+      /invalid ttlMs/,
+    );
+    assert.equal(loaderRan, false, 'loader must not run for invalid options');
+
+    // Bad tags must also reject on a HIT (deterministic, not miss-only).
+    const warm = new StalefreeCache({ defaultTtlMs: 1_000, clock: fakeClock().now });
+    await warm.set('k', 'cached');
+    await assert.rejects(
+      () => warm.wrap('k', () => 'v', { tags: ['bad tag'] }),
+      /invalid cache tag/,
+    );
+  });
+
   test('an undefined loader result is returned but never cached', async () => {
     const cache = new StalefreeCache({ defaultTtlMs: 500, clock: fakeClock().now });
     let loads = 0;

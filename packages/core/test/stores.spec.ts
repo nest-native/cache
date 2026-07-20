@@ -102,6 +102,35 @@ storeContract('postgres (real pglite)', async () => {
   };
 });
 
+describe('PostgresCacheStore.invalidateTagsInTx (transactional L2 invalidation)', () => {
+  test('rows die with the commit and survive a rollback', async () => {
+    const raw = new PGlite();
+    const db = drizzlePg(raw);
+    await db.execute(
+      'CREATE TABLE stalefree_cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, expires_at BIGINT NOT NULL, tags TEXT NOT NULL)',
+    );
+    const store = new PostgresCacheStore(db, pgTable());
+    await store.set('k', entry('v', 5_000, ['t']));
+
+    // Rollback: the L2 row survives (the invalidation was atomic with the tx).
+    await assert.rejects(
+      db.transaction(async (tx) => {
+        await store.invalidateTagsInTx(tx as never, ['t']);
+        throw new Error('force rollback');
+      }),
+      /force rollback/,
+    );
+    assert.equal((await store.get('k'))?.value, 'v', 'row survived the rollback');
+
+    // Commit: the row dies with the transaction.
+    await db.transaction(async (tx) => {
+      await store.invalidateTagsInTx(tx as never, ['t']);
+    });
+    assert.equal(await store.get('k'), undefined, 'row died with the commit');
+    await raw.close();
+  });
+});
+
 describe('mysql store SQL shape (drizzle-mysql2 builder)', () => {
   // No in-process MySQL exists; the real round-trip is the gated integration
   // spec. Here the REAL drizzle mysql2 builder runs against a recording fake
@@ -131,6 +160,14 @@ describe('mysql store SQL shape (drizzle-mysql2 builder)', () => {
     assert.match(statements[1]!, /like .+ escape/i);
     assert.match(statements[2]!, /`expires_at` <= /i);
     assert.match(statements[3]!, /delete from/i);
+  });
+
+  test('rejects keys beyond MySQL\'s 191-char column loudly (no silent L2 no-op)', async () => {
+    const { db } = recordingDb();
+    const store = new MysqlCacheStore(db, mysqlTable());
+    const longKey = 'k'.repeat(192); // valid for the shared validator (<=256)
+    await assert.rejects(() => store.set(longKey, entry('v', 1_000)), /191-char/);
+    await assert.rejects(() => store.get(longKey), /191-char/);
   });
 
   test('get maps a row and a miss', async () => {

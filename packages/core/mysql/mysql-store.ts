@@ -6,10 +6,28 @@ import type { StalefreeCacheTable } from './schema';
 
 type Db = MySql2Database<Record<string, never>>;
 
+// MySQL's indexable varchar key is 191 chars (utf8mb4) — narrower than the
+// shared 256-char validator. A longer key must FAIL LOUDLY (the cache reports
+// it via onError and falls open) instead of silently erroring on insert and
+// never persisting to L2.
+const MYSQL_MAX_KEY_LENGTH = 191;
+
+function assertMysqlKeyLength(key: string): void {
+  if (key.length > MYSQL_MAX_KEY_LENGTH) {
+    throw new Error(
+      `cache key exceeds MySQL's ${MYSQL_MAX_KEY_LENGTH}-char key column: ${JSON.stringify(key.slice(0, 40))}…`,
+    );
+  }
+}
+
 /**
  * mysql2 L2 store — fully asynchronous; single-statement methods (upsert via
  * ON DUPLICATE KEY UPDATE with plain-value SETs, so the MySQL column-order
  * trap does not apply). Freshness policy lives in the cache.
+ *
+ * REQUIRES the key column to use `COLLATE utf8mb4_bin` — see the schema
+ * factory's doc for the mandatory migration edit (MySQL's default collation
+ * is case-insensitive and would collide case-distinct keys).
  */
 export class MysqlCacheStore implements CacheStore {
   constructor(
@@ -18,6 +36,7 @@ export class MysqlCacheStore implements CacheStore {
   ) {}
 
   async get(key: string): Promise<CacheEntry | undefined> {
+    assertMysqlKeyLength(key);
     const [row] = await (this.db as Db)
       .select()
       .from(this.table)
@@ -33,6 +52,7 @@ export class MysqlCacheStore implements CacheStore {
   }
 
   async set(key: string, entry: CacheEntry): Promise<void> {
+    assertMysqlKeyLength(key);
     await (this.db as Db)
       .insert(this.table)
       .values({

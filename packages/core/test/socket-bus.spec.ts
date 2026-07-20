@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert';
-import { writeFileSync } from 'node:fs';
+import { unlinkSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -51,12 +51,15 @@ describe('SocketInvalidationBus', () => {
     }
   });
 
-  test('publisher-local subscribers always hear a publish (solo hub)', async () => {
+  test('publisher-local subscribers always hear a publish (solo hub); unsubscribe detaches', async () => {
     const bus = await startBus({ path: socketPath() });
     const seen: InvalidationMessage[] = [];
-    bus.subscribe((m) => seen.push(m));
+    const unsubscribe = bus.subscribe((m) => seen.push(m));
     bus.publish({ tags: ['t'] });
     assert.deepEqual(seen, [{ tags: ['t'] }]);
+    unsubscribe();
+    bus.publish({ tags: ['t2'] });
+    assert.equal(seen.length, 1, 'unsubscribed handler hears nothing');
   });
 
   test('peer → hub and hub → peer delivery; hub rebroadcasts across peers', async () => {
@@ -207,6 +210,100 @@ describe('SocketInvalidationBus', () => {
     const start = Date.now();
     await bus.close();
     assert.ok(Date.now() - start < 4_000, 'close must cut the 60s retry backoff');
+  });
+
+  test('close() racing an in-flight start() resolves and releases the path (review critical #1)', async () => {
+    const path = socketPath();
+    const bus = new SocketInvalidationBus({ path });
+    const starting = bus.start(); // do NOT await — close races the attach
+    const begun = Date.now();
+    await bus.close();
+    assert.ok(Date.now() - begun < 4_000, 'close must not hang on the zombie role');
+    await starting;
+    // The path must be fully released: a fresh bus binds and works.
+    const next = await startBus({ path });
+    const seen: InvalidationMessage[] = [];
+    next.subscribe((m) => seen.push(m));
+    next.publish({ tags: ['alive'] });
+    assert.equal(seen.length, 1);
+  });
+
+  test('a hub stranded off its socket path resigns and the mesh heals (review critical #2)', async () => {
+    const path = socketPath();
+    const errors: unknown[] = [];
+    const hub = await startBus({ path, reconnectDelayMs: 20, onError: (e) => errors.push(e) });
+    unlinkSync(path); // simulate a reclaim race yanking the live hub's file
+    await until(
+      () => errors.some((e) => /lost its socket path/.test(String((e as Error).message))),
+      'the self-check detects the stranding',
+    );
+    // After resigning, the supervision loop rebinds — a new peer can join and
+    // receive, proving the partition healed instead of lasting forever.
+    const peer = await startBus({ path, reconnectDelayMs: 20 });
+    const seen: InvalidationMessage[] = [];
+    peer.subscribe((m) => seen.push(m));
+    await until(() => {
+      hub.publish({ tags: ['healed'] });
+      return seen.length >= 1;
+    }, 'delivery resumes after self-healing');
+  });
+
+  test('an oversized publish degrades to {clear:true} on the wire (colder, never staler)', async () => {
+    const path = socketPath();
+    const hub = await startBus({ path });
+    const peer = await startBus({ path, reconnectDelayMs: 25 });
+    const peerSeen: InvalidationMessage[] = [];
+    peer.subscribe((m) => peerSeen.push(m));
+    const hubSeen: InvalidationMessage[] = [];
+    hub.subscribe((m) => hubSeen.push(m));
+    // ~1000 tags x 100 chars ≈ 100KB — beyond the send cap.
+    const huge = Array.from({ length: 1_000 }, (_, i) => `t${'x'.repeat(100)}${i}`);
+    await until(() => {
+      hub.publish({ tags: huge });
+      return peerSeen.length >= 1;
+    }, 'the degraded frame arrives');
+    assert.deepEqual(peerSeen[0], { clear: true }, 'wire degraded to a full clear');
+    assert.ok(
+      (hubSeen[0] as { tags?: string[] }).tags?.length === 1_000,
+      'local subscribers still get the precise message',
+    );
+  });
+
+  test('a one-chunk burst of many small frames is delivered, not killed by the cap', async () => {
+    const path = socketPath();
+    const errors: unknown[] = [];
+    const hub = await startBus({ path, onError: (e) => errors.push(e) });
+    const seen: InvalidationMessage[] = [];
+    hub.subscribe((m) => seen.push(m));
+    const raw = connect(path);
+    await new Promise<void>((resolve) => raw.once('connect', () => resolve()));
+    // ~70KB of small valid frames in ONE write: legal traffic that would trip
+    // a cap applied to the undrained buffer before splitting.
+    const burst = Array.from({ length: 2_000 }, (_, i) =>
+      JSON.stringify({ keys: [`key-${i}-${'x'.repeat(20)}`] }),
+    ).join('\n') + '\n';
+    assert.ok(burst.length > 65_536, 'the burst really exceeds the frame cap');
+    raw.write(burst);
+    await until(() => seen.length === 2_000, 'every frame in the burst delivered');
+    assert.deepEqual(errors, [], 'no cap violation for legal traffic');
+    raw.destroy();
+  });
+
+  test('a post-listen server error resigns the hub role (handler unit-tested directly)', async () => {
+    const path = socketPath();
+    const errors: unknown[] = [];
+    const bus = await startBus({ path, reconnectDelayMs: 20, onError: (e) => errors.push(e) });
+    type HasHandler = { onServerError: (error: unknown) => void };
+    (bus as unknown as HasHandler).onServerError(new Error('EMFILE'));
+    assert.match(String((errors[0] as Error).message), /EMFILE/);
+    // The role resigned; the supervision loop re-elects and delivery resumes.
+    const peer = await startBus({ path, reconnectDelayMs: 20 });
+    const seen: InvalidationMessage[] = [];
+    peer.subscribe((m) => seen.push(m));
+    await until(() => {
+      bus.publish({ tags: ['recovered'] });
+      return seen.length >= 1;
+    }, 'delivery after server-error resignation');
   });
 
   test('close() before start() is safe; closing a peer detaches it', async () => {

@@ -71,10 +71,13 @@ const bus = new PostgresInvalidationBus({
 bus.start();
 const cache = new StalefreeCache({ bus, defaultTtlMs: 30_000 });
 
-// transactional invalidation: atomic with your write
+// transactional invalidation: atomic with your write. With an L2 store
+// configured, delete its rows IN THE SAME TX (publishInTx only evicts L1s —
+// without this line every instance would refill stale from L2):
 await db.transaction(async (tx) => {
   await tx.update(projects)...;
-  await bus.publishInTx(tx, { tags: [`project:${id}`] });
+  await store.invalidateTagsInTx(tx, [`project:${id}`]); // L2 dies with the commit
+  await bus.publishInTx(tx, { tags: [`project:${id}`] }); // L1s evict on commit
 });
 ```
 
