@@ -209,10 +209,11 @@ jobs:
         run: npm ci
 
       - name: Pin NestJS to major ${{ matrix.nest-major }}
-        # All four @nestjs packages move together: the root devDeps carry
-        # platform-express/testing at ^11, and pinning only common/core makes
-        # their peer ranges unresolvable (ERESOLVE) on the 10 lane.
-        run: npm install --no-save "@nestjs/common@^${{ matrix.nest-major }}" "@nestjs/core@^${{ matrix.nest-major }}" "@nestjs/platform-express@^${{ matrix.nest-major }}" "@nestjs/testing@^${{ matrix.nest-major }}"
+        # --legacy-peer-deps: an in-place major downgrade always fights the
+        # installed ^11 peer web (platform-express/testing at the root). This
+        # lane exists to TYPECHECK the adapter against the older typings; peer
+        # strictness during the pin is noise, not signal.
+        run: npm install --no-save --legacy-peer-deps "@nestjs/common@^${{ matrix.nest-major }}" "@nestjs/core@^${{ matrix.nest-major }}"
 
       - name: Build core (@stalefree/core)
         run: npm run build --workspace @stalefree/core
@@ -236,7 +237,7 @@ jobs:
         run: npm ci
 
       - name: Pin NestJS to the 12 pre-release line
-        run: npm install --no-save --workspace @nest-native/cache "@nestjs/common@12 || @nestjs/common@^12.0.0-0" "@nestjs/core@12 || @nestjs/core@^12.0.0-0"
+        run: npm install --no-save --legacy-peer-deps "@nestjs/common@^12.0.0-0" "@nestjs/core@^12.0.0-0"
 
       - name: Build core (@stalefree/core)
         run: npm run build --workspace @stalefree/core
