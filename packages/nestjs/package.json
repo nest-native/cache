@@ -1,6 +1,6 @@
 {
   "name": "@nest-native/cache",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "NestJS adapter for @stalefree/core — tag-based cache invalidation through the database you already have; no Redis",
   "keywords": [
     "nestjs",
@@ -30,12 +30,12 @@
     "node": ">=20"
   },
   "scripts": {
-    "clean": "rimraf dist tsconfig.tsbuildinfo",
+    "clean": "rimraf dist tsconfig.tsbuildinfo tsconfig.build.tsbuildinfo",
     "build": "npm run clean && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@stalefree/core": "0.0.0"
+    "@stalefree/core": "0.1.0"
   },
   "peerDependencies": {
     "@nestjs/common": "^10.0.0 || ^11.0.0 || ^12.0.0",

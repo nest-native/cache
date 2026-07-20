@@ -1,6 +1,6 @@
 {
   "name": "@stalefree/core",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Framework-agnostic tag-based cache invalidation through the database you already have — in-memory L1, optional Drizzle L2, and an invalidation bus over Postgres LISTEN/NOTIFY (transactional: delivered on commit, dropped on rollback)",
   "keywords": [
     "cache",
@@ -52,7 +52,8 @@
       "types": "./dist/mysql/index.d.ts",
       "require": "./dist/mysql/index.js",
       "default": "./dist/mysql/index.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "engines": {
     "node": ">=20"
@@ -66,7 +67,7 @@
     }
   },
   "scripts": {
-    "clean": "rimraf dist tsconfig.tsbuildinfo",
+    "clean": "rimraf dist tsconfig.tsbuildinfo tsconfig.build.tsbuildinfo",
     "build": "npm run clean && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
