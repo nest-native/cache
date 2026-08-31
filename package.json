@@ -5,7 +5,7 @@
   "description": "Workspace for @stalefree/core (framework-agnostic tag-based cache invalidation through your database) and @nest-native/cache (the NestJS adapter)",
   "license": "MIT",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "workspaces": [
     "packages/*",
