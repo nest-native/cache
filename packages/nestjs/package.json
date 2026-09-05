@@ -27,7 +27,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "clean": "rimraf dist tsconfig.tsbuildinfo tsconfig.build.tsbuildinfo",

@@ -30,6 +30,18 @@ it's the reference implementation of the `InvalidationBus` contract, the seam
 for tests, and the coherence story for two `StalefreeCache` instances living
 in one process.
 
+:::warning Several instances and no bus is a choice, not a default
+`bus` is optional, so a multi-instance deployment without one starts fine and
+never errors: `invalidateTags` evicts the calling instance's L1 (and the
+shared L2, if configured), and every *other* instance keeps serving its own
+L1 copy until that entry's TTL runs out. Same backstop, wider blast radius —
+a bus that is down or partitioned costs staleness-until-TTL on the
+invalidations it missed, while no bus at all costs it on **every**
+invalidation. Pick the tier your deployment actually is, and size
+`defaultTtlMs` as the staleness you are willing to serve when the bus can't
+help you.
+:::
+
 ## Same machine: the socket bus
 
 For several processes on one machine — the classic app + worker split, and

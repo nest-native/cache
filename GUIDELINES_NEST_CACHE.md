@@ -61,7 +61,7 @@ over `@authlock/core`.
 - **Stampede protection is in-process single-flight** (concurrent `wrap()`
   calls for one key share one loader run). Cross-instance stampede control is
   OUT of scope for v1 — documented, not pretended.
-- Support line: Node `>=20`; the adapter targets NestJS `10.x`/`11.x`/`12.x`;
+- Support line: Node `>=22`; the adapter targets NestJS `10.x`/`11.x`/`12.x`;
   Drizzle stores target `0.44`/`0.45`.
 
 ### 2. Public API
