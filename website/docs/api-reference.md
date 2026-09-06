@@ -143,7 +143,9 @@ Two deliberate details:
   else's module.
 
 The adapter builds only on stable Nest primitives and supports NestJS
-**10, 11, and 12**. All caching logic lives in the framework-agnostic core.
+**10, 11, and 12** — each major exercised in CI, not just declared (see the
+[support policy](./support-policy.md)). All caching logic lives in the
+framework-agnostic core.
 
 ## Operational notes
 

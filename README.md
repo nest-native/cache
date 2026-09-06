@@ -55,6 +55,21 @@ await cache.invalidateTags([`project:${id}`]);
 | [`@stalefree/core`](packages/core) ([npm](https://www.npmjs.com/package/@stalefree/core)) | The framework-agnostic, zero-dependency engine: `StalefreeCache` (L1 LRU + reverse tag index, `wrap` single-flight, fail-open), the invalidation buses (`.`, `./socket`, `./postgres`), and the Drizzle L2 stores (`./sqlite`, `./postgres`, `./mysql`) |
 | [`@nest-native/cache`](packages/nestjs) ([npm](https://www.npmjs.com/package/@nest-native/cache)) | The thin NestJS DI adapter: `CacheModule.forRoot/forRootAsync` + `CacheService`; NestJS 10, 11, and 12 |
 
+## Compatibility
+
+| Runtime | Supported line |
+| --- | --- |
+| Node.js | `>=22` (`>=22.12` when paired with NestJS 12 — its own `require(esm)` floor) |
+| NestJS (`@nest-native/cache` peer) | `^10.0.0 \|\| ^11.0.0 \|\| ^12.0.0` |
+| `drizzle-orm` (`@stalefree/core` optional peer) | `^0.44.0 \|\| ^0.45.0` |
+
+Each NestJS major in that range is exercised in CI, not just declared: 10 and
+11 typecheck the adapter, and 12 gets the full run (typecheck + both suites)
+on an install that provably resolves `@nestjs/*@12` inside the adapter
+workspace. The devDependencies and the lockfile stay on 11.x on purpose, so
+both ends of the range are tested claims — see the
+[support policy](https://nest-native.dev/cache/docs/support-policy).
+
 ## Coherence across instances: pick your bus
 
 | Deployment | Bus | Import |
@@ -83,6 +98,7 @@ bare-Express sample lives in [`sample/`](sample/00-express-two-instances)
 - `npm run test:nestjs` — the adapter's own suite; the enforced coverage gate measures `@stalefree/core`, the thin DI shell is exercised here
 - `npm run infra:up && npm run test:full` — adds gated round-trips against real Postgres + MySQL (Docker, local-only)
 - `npm run sample` — the two-process invalidation smoke
+- CI adds a NestJS 12 compatibility leg (`nestjs-latest-major`): `@nestjs/*@^12` installed on top of the 11.x lockfile with `--no-save`, then the adapter typecheck and both suites again
 - The binding constitution is [GUIDELINES_NEST_CACHE.md](GUIDELINES_NEST_CACHE.md); `main` is PR-only
 
 MIT licensed. Part of the [nest-native](https://github.com/nest-native) family.

@@ -3,6 +3,38 @@
 All notable user-facing changes to `@stalefree/core` and `@nest-native/cache`
 are tracked here.
 
+## Unreleased
+
+CI, docs, and Dependabot only — no package change; both packages remain at
+0.1.0.
+
+- **NestJS 12 support is now a tested claim, not a declared one.** The adapter
+  already published `@nestjs/common` / `@nestjs/core` peers of
+  `^10.0.0 || ^11.0.0 || ^12.0.0`, so nothing changes for consumers, and the
+  devDependencies and the lockfile stay on 11.x. What changed: the
+  informational 12-alpha canary (typecheck only, `continue-on-error`) is
+  replaced by a `nestjs-latest-major` CI leg — no `continue-on-error`, so a
+  12 breakage fails the run — that installs `@nestjs/*@^12` on top of the
+  11.x lockfile (`--no-save`), proves from inside the adapter workspace that
+  `@nestjs/core` resolved to 12, and runs the adapter typecheck and both
+  suites. Nothing was broken on 12: the
+  adapter has no deep `@nestjs/*` imports (NestJS 12 is ESM-only, so a
+  directory import such as `@nestjs/common/interfaces` would not resolve),
+  and its one lifecycle hook — `onApplicationShutdown` detaching the cache
+  from the bus — does not depend on the cross-provider hook order that 12
+  changed. Dependabot config added (there was none), with the peer group
+  including majors so the next NestJS major arrives as one installable PR
+  rather than one `ERESOLVE` per package. Docs gained a support-policy page
+  with the compatibility table and the peer-major recipe.
+- **The effective Node floor with NestJS 12 is stated.** NestJS 12 itself
+  needs Node `>=22.12` (its `require(esm)` requirement, which its packages'
+  `engines` field — `>= 20` — does not encode, so npm never warns); every
+  compatibility table now says so. The packages' own `engines` stay `>=22`:
+  with NestJS 10 or 11 the adapter runs on any Node 22.
+- **Both supported Node majors run the suites.** The tests/coverage lane that
+  still carried its `(Node 20)` name from before the Node 20 sunset now runs
+  on Node 24; until now 24 only got the build/typecheck matrix.
+
 ## 0.1.0 - 2026-07-19
 
 The first published release (both packages).
