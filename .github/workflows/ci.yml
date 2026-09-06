@@ -193,8 +193,8 @@ jobs:
     runs-on: ubuntu-latest
     # The adapter builds only on stable Nest primitives (DynamicModule and
     # plain injectable providers), so it must typecheck against every
-    # supported major. Becomes fully meaningful once CacheModule/CacheService
-    # land.
+    # supported major. 10 and 11 are the older end of the range; the newest
+    # major gets the full run (typecheck + both suites) in nestjs-latest-major.
     strategy:
       fail-fast: false
       matrix:
@@ -221,12 +221,26 @@ jobs:
       - name: Typecheck adapter against NestJS ${{ matrix.nest-major }}
         run: npm run typecheck --workspace @nest-native/cache
 
-  nestjs-canary:
-    name: NestJS 12-alpha canary (informational)
+  nestjs-latest-major:
+    name: NestJS 12 compatibility (Node 22)
     runs-on: ubuntu-latest
-    # Gated, informational: tracks the next NestJS major before it is stable.
-    # continue-on-error so a breaking pre-release never blocks a merge.
-    continue-on-error: true
+    # The adapter's published peer range is ^10 || ^11 || ^12, but the
+    # devDependencies and the lockfile every other job installs stay on 11.x so
+    # the default suite keeps testing the older end. This leg installs 12 on
+    # top of that lockfile with --no-save and runs the adapter typecheck and
+    # both suites, which makes the 12 end of the range a tested claim rather
+    # than an assumption. --workspaces --include-workspace-root is load-
+    # bearing even though only the root declares @nestjs/*: a root-only
+    # install (--workspace-root) fails ERESOLVE, because npm swaps the four
+    # peer-linked packages one at a time inside the 11 tree and trips over
+    # platform-express@11 still peering on core@^11; declaring the specs from
+    # every workspace too makes npm re-resolve the set as a whole (verified
+    # locally on a fresh `npm ci` tree, 2026-09-06). The proof step below
+    # fails on a nested 11 instead of passing silently. The sample is bare
+    # Express with no @nestjs/* anywhere (the neutrality proof), so it has
+    # nothing to say about 12 and is not part of this leg. This job replaced
+    # the informational 12-alpha canary once 12 went stable (2026-08-27), and
+    # unlike the canary it blocks.
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -236,14 +250,37 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Pin NestJS to the 12 pre-release line
-        run: npm install --no-save --legacy-peer-deps "@nestjs/common@^12.0.0-0" "@nestjs/core@^12.0.0-0"
+      - name: Install NestJS 12 (this job only, never saved)
+        run: |
+          npm install --no-save --workspaces --include-workspace-root \
+            @nestjs/common@^12.0.0 \
+            @nestjs/core@^12.0.0 \
+            @nestjs/platform-express@^12.0.0 \
+            @nestjs/testing@^12.0.0
+
+      - name: Prove the adapter resolves NestJS 12
+        # NestJS 12 does not export ./package.json, so the version is read next
+        # to the resolved entry point, from inside the adapter workspace.
+        run: |
+          cd packages/nestjs && node -e "
+            const path = require('node:path');
+            const root = path.dirname(require.resolve('@nestjs/core'));
+            const { version } = require(path.join(root, 'package.json'));
+            console.log(process.cwd(), '@nestjs/core', version, '<-', root);
+            if (!version.startsWith('12.')) process.exit(1);
+          "
 
       - name: Build core (@stalefree/core)
         run: npm run build --workspace @stalefree/core
 
-      - name: Typecheck adapter against NestJS 12-alpha
+      - name: Typecheck adapter against NestJS 12
         run: npm run typecheck --workspace @nest-native/cache
+
+      - name: Run core tests against NestJS 12
+        run: npm test
+
+      - name: Run adapter tests against NestJS 12
+        run: npm run test:nestjs
 
   release-and-security:
     name: Release and security checks
