@@ -55,7 +55,8 @@ What that buys you in practice:
 | [`@nest-native/cache`](https://www.npmjs.com/package/@nest-native/cache) | a thin NestJS DI adapter (`CacheModule` + `CacheService`) |
 
 Use the core directly from Express, Fastify, or a bare script; use the adapter
-when you're on NestJS (10, 11, or 12).
+when you're on NestJS (10, 11, or 12 — see the
+[support policy](./support-policy.md) for how each major is tested).
 
 ## What it is not
 

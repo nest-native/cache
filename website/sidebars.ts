@@ -14,6 +14,7 @@ const sidebars: SidebarsConfig = {
     'stores',
     'semantics',
     'api-reference',
+    'support-policy',
   ],
 };
 

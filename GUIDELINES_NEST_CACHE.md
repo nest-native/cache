@@ -61,8 +61,9 @@ over `@authlock/core`.
 - **Stampede protection is in-process single-flight** (concurrent `wrap()`
   calls for one key share one loader run). Cross-instance stampede control is
   OUT of scope for v1 — documented, not pretended.
-- Support line: Node `>=22`; the adapter targets NestJS `10.x`/`11.x`/`12.x`;
-  Drizzle stores target `0.44`/`0.45`.
+- Support line: Node `>=22`; the adapter targets NestJS `10.x`/`11.x`/`12.x`
+  (published peer `^10.0.0 || ^11.0.0 || ^12.0.0` — both ends of the range
+  are tested claims, see §3); Drizzle stores target `0.44`/`0.45`.
 
 ### 2. Public API
 
@@ -96,13 +97,70 @@ over `@authlock/core`.
   default (unlike authlock — cache keys are not credentials), but nothing
   secret may ever be required to appear in a key/tag (document it).
 - No `Date.now()` scattered: a single injected clock seam, mutation-testable.
+- **Version compatibility — the peer-major recipe, as applied to NestJS.** The
+  adapter builds ONLY on stable Nest primitives (`DynamicModule`, plain
+  injectable providers, `OnApplicationShutdown`) so the same code runs on
+  NestJS 10, 11, and 12. A new peer major is **widened into the range, never
+  swapped in**: (1) the published `peerDependencies` range widens; (2) the
+  `@nestjs/*` devDependencies — and therefore the lockfile every default CI
+  job installs — stay on the older major (11.x today) so the default suite
+  keeps testing that end; (3) a dedicated CI leg installs the newer major
+  with `--no-save` on top of that lockfile and runs the typecheck and both
+  suites. That leg is `nestjs-latest-major`: it installs `@nestjs/*@^12`
+  with `npm install --no-save --workspaces --include-workspace-root` (the
+  workspace flags are load-bearing even though only the root declares
+  `@nestjs/*`: a root-only `--workspace-root` install fails ERESOLVE because
+  npm swaps the four peer-linked packages one at a time inside the 11 tree
+  and trips over `platform-express@11` still peering on `core@^11`;
+  declaring the specs from every workspace makes npm re-resolve the set as a
+  whole), asserts from inside `packages/nestjs` that
+  `@nestjs/core` resolved to 12 before running anything, then runs the
+  adapter typecheck, the core suite, and the adapter suite. It blocks; it
+  replaced the informational 12-alpha canary once 12 went stable
+  (2026-08-27). A 10/11 matrix typechecks the adapter at the older end.
+  Dependabot cannot deliver a NestJS major on its own: the `@nestjs/*`
+  packages peer on each other, so one-package-per-PR bumps fail `npm ci`
+  with ERESOLVE before a single test runs (NestJS 12 opened fifteen such PRs
+  across the org). The peer group in `.github/dependabot.yml` therefore
+  groups majors too, so the next major arrives as one PR whose result
+  carries information — input to this recipe, not a replacement for it.
+- **NestJS 12 is ESM-only: never import a directory index from `@nestjs/*`.**
+  `@nestjs/common` and `@nestjs/core` 12 ship an exports map of
+  `{".", "./internal", "./*.js", "./*": "./*.js"}`. A deep import that names a
+  *file* (`@nestjs/core/injector/constants`) still resolves under it; one that
+  names a *directory* (`@nestjs/common/interfaces`) does not, because there is
+  no `<dir>.js` and ESM never completes a directory to its `index`. That one
+  import was the whole NestJS 12 failure in `@nest-native/kafka` and
+  `@nest-native/trpc`. This adapter has **no** deep imports at all — every
+  import comes from the `@nestjs/common` / `@nestjs/testing` roots — and that
+  is the intended state: the stable-primitives rule above already forbids
+  reaching into internals. If a deep import ever becomes unavoidable it must
+  name a file, and the `nestjs-latest-major` leg is the enforcement here: a
+  directory import fails its typecheck and suite on 12, which the 11.x
+  install would never notice. Do not reach for
+  `@nestjs/common/interfaces/controllers/controller.interface` as a workaround
+  — still an internal path, and 12 defines that type as plain `object` anyway.
+- **Lifecycle-hook order across providers is not a contract.** NestJS 12
+  reordered lifecycle hooks (`onModuleInit`, `onApplicationBootstrap`,
+  `onModuleDestroy`, `beforeApplicationShutdown`, `onApplicationShutdown`) by
+  the component's level in the module hierarchy, so the order in which two
+  providers see the *same* hook differs between 11 and 12; the phase order is
+  unchanged. This adapter's only hook is `CacheModule.onApplicationShutdown`,
+  which calls `cache.close()` — a synchronous local unsubscribe from the bus
+  (every shipped bus implements it as a `Set.delete`, a no-op once the bus is
+  closed), so it is correct whether the application's bus or database closes
+  before or after it (the bus and store belong to the app, §2). Any future
+  hook may
+  rely on the phase order only — never on where another provider's same-phase
+  hook falls — and no test may assert a within-phase order.
 
 ### 4. Non-negotiable style
 
 - 100% test coverage (branches/functions/lines/statements) on the **core**
   package; SonarJS cognitive complexity ≤ 15 per function on the core.
 - The **adapter** is a thin DI shell, tested pragmatically (the lockout
-  precedent), with Nest 10/11 lanes + a gated informational 12-canary.
+  precedent), with Nest 10/11 typecheck lanes + the blocking
+  `nestjs-latest-major` leg that runs it for real on the newest major (§3).
 - Tests cover: TTL expiry (fake clock), tag eviction incl. the reverse index,
   single-flight (N concurrent wraps → 1 loader call), bus round-trips over real
   sockets and real Postgres (gated), chunking + epoch-bump degradation, and the
