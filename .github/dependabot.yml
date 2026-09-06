@@ -1,0 +1,87 @@
+version: 2
+
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+      include: "scope"
+    groups:
+      dev-tooling-minor-patch:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+        patterns:
+          - "*"
+      # Majors are grouped deliberately, not just minors and patches. The
+      # @nestjs/* packages are a set with peer dependencies on each other, so a
+      # major that arrives one-package-per-PR produces a tree npm refuses to
+      # install: NestJS 12 opened fifteen separate PRs across this org, each
+      # bumping one package and leaving its siblings on 11, and every one failed
+      # `npm ci` with ERESOLVE before a single test ran. Grouped, a major
+      # arrives as one PR that can actually be evaluated.
+      cache-peer:
+        update-types:
+          - "major"
+          - "minor"
+          - "patch"
+        patterns:
+          - "@electric-sql/pglite"
+          - "@nestjs/common"
+          - "@nestjs/core"
+          - "@nestjs/platform-express"
+          - "@nestjs/testing"
+          - "better-sqlite3"
+          - "drizzle-orm"
+          - "mysql2"
+          - "pg"
+          - "reflect-metadata"
+          - "rxjs"
+
+  - package-ecosystem: "npm"
+    directory: "/website"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+      include: "scope"
+    groups:
+      docusaurus-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+        patterns:
+          - "@docusaurus/*"
+      website-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "@docusaurus/*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(actions)"
+      include: "scope"
