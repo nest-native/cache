@@ -81,9 +81,10 @@ This package is a thin DI shell: `CacheModule.forRoot/forRootAsync`,
 `CacheService`, and a shutdown hook that detaches the cache from the bus. All
 the caching logic — the L1 LRU + tag index, `wrap` single-flight, TTL policy,
 fail-open — lives in the framework-agnostic core, usable from Express or any
-other framework. Supports **NestJS 10, 11, and 12** (stable primitives only),
-and each major is exercised in CI: 10 and 11 typecheck the adapter, 12 gets
-the full run on an install that provably resolves `@nestjs/*@12`.
+other framework. Supports **NestJS 10, 11, and 12** (stable primitives only;
+NestJS 12 itself needs Node `>=22.12`), and each major is exercised in CI: 10
+and 11 typecheck the adapter, 12 gets the full run on an install that provably
+resolves `@nestjs/*@12`.
 
 MIT licensed. Part of the [nest-native](https://github.com/nest-native) family.
 Not affiliated with the NestJS core team.

@@ -61,9 +61,15 @@ over `@authlock/core`.
 - **Stampede protection is in-process single-flight** (concurrent `wrap()`
   calls for one key share one loader run). Cross-instance stampede control is
   OUT of scope for v1 — documented, not pretended.
-- Support line: Node `>=22`; the adapter targets NestJS `10.x`/`11.x`/`12.x`
-  (published peer `^10.0.0 || ^11.0.0 || ^12.0.0` — both ends of the range
-  are tested claims, see §3); Drizzle stores target `0.44`/`0.45`.
+- Support line: Node `>=22` (`engines` on both packages); the adapter targets
+  NestJS `10.x`/`11.x`/`12.x` (published peer `^10.0.0 || ^11.0.0 || ^12.0.0`
+  — both ends of the range are tested claims, see §3). NestJS 12 itself needs
+  Node `>=22.12` — its `require(esm)` floor (upstream says 20.19+ / 22.12+;
+  Node 20 is outside this line), which the `@nestjs/*` `engines` field
+  (`>= 20`) does not encode, so npm never warns. That is the effective floor
+  when the adapter is paired with 12; it is stated in every compatibility
+  table and stays out of `engines`, which describe the adapter alone — with
+  NestJS 10/11 it runs on any Node 22. Drizzle stores target `0.44`/`0.45`.
 
 ### 2. Public API
 
@@ -115,9 +121,12 @@ over `@authlock/core`.
   declaring the specs from every workspace makes npm re-resolve the set as a
   whole), asserts from inside `packages/nestjs` that
   `@nestjs/core` resolved to 12 before running anything, then runs the
-  adapter typecheck, the core suite, and the adapter suite. It blocks; it
-  replaced the informational 12-alpha canary once 12 went stable
-  (2026-08-27). A 10/11 matrix typechecks the adapter at the older end.
+  adapter typecheck, the core suite, and the adapter suite. It runs without
+  `continue-on-error`, so a 12 breakage fails the run — a red CI run, the
+  same weight as any other job; it replaced the informational 12-alpha
+  canary once 12 went stable (2026-08-27). It runs on Node 22 (the newest
+  22.x, above NestJS 12's `>=22.12` floor, §1). A 10/11 matrix typechecks
+  the adapter at the older end.
   Dependabot cannot deliver a NestJS major on its own: the `@nestjs/*`
   packages peer on each other, so one-package-per-PR bumps fail `npm ci`
   with ERESOLVE before a single test runs (NestJS 12 opened fifteen such PRs
@@ -159,8 +168,9 @@ over `@authlock/core`.
 - 100% test coverage (branches/functions/lines/statements) on the **core**
   package; SonarJS cognitive complexity ≤ 15 per function on the core.
 - The **adapter** is a thin DI shell, tested pragmatically (the lockout
-  precedent), with Nest 10/11 typecheck lanes + the blocking
-  `nestjs-latest-major` leg that runs it for real on the newest major (§3).
+  precedent), with Nest 10/11 typecheck lanes + the `nestjs-latest-major`
+  leg that runs it for real on the newest major and fails the run on a
+  breakage there (§3).
 - Tests cover: TTL expiry (fake clock), tag eviction incl. the reverse index,
   single-flight (N concurrent wraps → 1 loader call), bus round-trips over real
   sockets and real Postgres (gated), chunking + epoch-bump degradation, and the

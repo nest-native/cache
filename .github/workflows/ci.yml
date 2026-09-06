@@ -43,17 +43,19 @@ jobs:
       - name: Typecheck adapter
         run: npm run typecheck --workspace @nest-native/cache
 
-  package-test-node-20:
-    name: Package tests/coverage (Node 20)
+  package-test-node-24:
+    name: Package tests/coverage (Node 24)
     runs-on: ubuntu-latest
-    # No external DB services: the core suite is fully hermetic (in-memory
-    # store + in-process bus), and the gated store/bus round-trips live in
+    # The second supported Node major runs the suites too, not only the
+    # build/typecheck matrix (package-quality is the Node 22 run). No external
+    # DB services: the core suite is fully hermetic (in-memory store +
+    # in-process bus), and the gated store/bus round-trips live in
     # store-integration.
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '24'
 
       - name: Install dependencies
         run: npm ci
@@ -239,8 +241,11 @@ jobs:
     # fails on a nested 11 instead of passing silently. The sample is bare
     # Express with no @nestjs/* anywhere (the neutrality proof), so it has
     # nothing to say about 12 and is not part of this leg. This job replaced
-    # the informational 12-alpha canary once 12 went stable (2026-08-27), and
-    # unlike the canary it blocks.
+    # the informational 12-alpha canary once 12 went stable (2026-08-27); it
+    # has no continue-on-error, so unlike the canary a 12 breakage fails the
+    # run. Node 22 here resolves to the newest 22.x, above NestJS 12's own
+    # floor of 22.12 (its require(esm) requirement, which the @nestjs/*
+    # engines field — ">= 20" — does not encode).
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

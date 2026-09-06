@@ -59,7 +59,7 @@ await cache.invalidateTags([`project:${id}`]);
 
 | Runtime | Supported line |
 | --- | --- |
-| Node.js | `>=22` |
+| Node.js | `>=22` (`>=22.12` when paired with NestJS 12 — its own `require(esm)` floor) |
 | NestJS (`@nest-native/cache` peer) | `^10.0.0 \|\| ^11.0.0 \|\| ^12.0.0` |
 | `drizzle-orm` (`@stalefree/core` optional peer) | `^0.44.0 \|\| ^0.45.0` |
 

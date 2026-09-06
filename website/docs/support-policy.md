@@ -7,7 +7,7 @@ title: Support Policy
 
 | Runtime | Supported line |
 | --- | --- |
-| Node.js | `>=22` |
+| Node.js | `>=22` (`>=22.12` when paired with NestJS 12 — its own `require(esm)` floor) |
 | NestJS (`@nest-native/cache` peer) | `^10.0.0 \|\| ^11.0.0 \|\| ^12.0.0` |
 | `drizzle-orm` (`@stalefree/core` optional peer) | `^0.44.0 \|\| ^0.45.0` |
 
@@ -15,6 +15,13 @@ title: Support Policy
 Drizzle-backed L2 stores (`@stalefree/core/{sqlite,postgres,mysql}`) need
 `drizzle-orm`, which is why it is an optional peer. The Postgres bus takes the
 client you construct and never imports `pg` itself.
+
+The Node line is the packages' own `engines`. NestJS 12 raises the effective
+floor to `>=22.12` when you pair the adapter with it: 12 ships ESM-only and
+relies on `require(esm)`, which upstream states as Node 20.19+ / 22.12+ (Node
+20 is outside this line). The `@nestjs/*` packages' `engines` field says only
+`>= 20`, so npm will not warn you on Node 22.0–22.11 — check the runtime
+yourself. With NestJS 10 or 11 the adapter runs on any Node 22.
 
 ## How a major is adopted
 
@@ -28,8 +35,9 @@ A new peer major is **widened into the range, never swapped in**:
    lockfile and runs the typecheck and the suites.
 
 Both ends of the range are then tested claims. NestJS 12 (released
-2026-08-27; ESM-only; Node `>=20.19` / `>=22.12`) is the live example: the
-`nestjs-latest-major` job installs `@nestjs/*@^12` in every workspace
+2026-08-27; ESM-only; Node `>=22.12` on this support line, see above) is the
+live example: the `nestjs-latest-major` job, on Node 22 (the newest 22.x,
+above that floor), installs `@nestjs/*@^12` in every workspace
 (`--no-save`; a root-only install cannot swap a peer-linked set in place),
 proves from inside the adapter workspace that `@nestjs/core` resolved to 12,
 and re-runs the adapter typecheck and both test suites. A 10/11 matrix
