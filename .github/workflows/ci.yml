@@ -191,16 +191,56 @@ jobs:
           STALEFREE_MYSQL_URL: mysql://root:stalefree-ci-password@127.0.0.1:3306/stalefree
 
   nestjs-compat:
-    name: NestJS ${{ matrix.nest-major }} backward-compat (adapter typecheck)
+    name: NestJS ${{ matrix.nest.label }} compatibility (Node 22)
     runs-on: ubuntu-latest
-    # The adapter builds only on stable Nest primitives (DynamicModule and
-    # plain injectable providers), so it must typecheck against every
-    # supported major. 10 and 11 are the older end of the range; the newest
-    # major gets the full run (typecheck + both suites) in nestjs-latest-major.
+    # The adapter's published peer range is ^10 || ^11 || ^12. The
+    # devDependencies and the lockfile every other job installs stay on the
+    # 11.x in the middle of that range, so this matrix is what makes its ENDS
+    # tested claims: each leg installs one end on top of the lockfile with
+    # --no-save and runs the adapter typecheck and both suites against it. It
+    # replaces two earlier lanes: a typecheck-only 10/11 matrix that pinned
+    # with --legacy-peer-deps (a leg that needs that flag is reporting an
+    # unsupported combination, not typechecking a supported one) and the
+    # blocking 12 leg. The sample is bare Express with no @nestjs/* anywhere
+    # (the neutrality proof), so it has nothing to say here.
+    #
+    # Two things keep a leg honest, because npm makes it easy to run a suite
+    # against a tree that is not the one you asked for:
+    # - --workspaces --include-workspace-root, even though only the root
+    #   declares @nestjs/*: a root-only install (--workspace-root) fails
+    #   ERESOLVE, because npm swaps the four peer-linked packages one at a
+    #   time inside the 11 tree and trips over platform-express@11 still
+    #   peering on core@^11; declaring the specs from every workspace makes
+    #   npm re-resolve the set as a whole.
+    # - scripts/check-nestjs-resolution.mjs proves the version from inside
+    #   every workspace (exactly, at the floors), fails on nested copies, and
+    #   checks every peer range in the NestJS ecosystem against the tree the
+    #   suite will run on. That final-tree check is the gate; npm prints
+    #   `ERESOLVE overriding peer dependency` and exits 0 both for a real
+    #   override and for transitional states that end coherent, so the
+    #   install log is diagnosis only.
+    # Node is not a dimension here on purpose: 22 floats to a current 22.x,
+    # which is what require(esm) on the 12 end needs (>=22.12, which the
+    # @nestjs/* engines field — ">= 20" — does not encode), and the build
+    # job already covers 24.
     strategy:
       fail-fast: false
       matrix:
-        nest-major: ['10', '11']
+        nest:
+          # 10.3.2, not 10.0.0: @nestjs/common 10.0.0 through 10.3.1 peer on
+          # reflect-metadata ^0.1.12, and this repo pins ^0.2.2, so 10.3.2 —
+          # the first 10.x whose peer admits 0.2 — is the oldest 10 that
+          # installs here at all. The adapter builds only on stable Nest
+          # primitives, so nothing it uses was added by a later 10.x. Not a
+          # peer-range correction: a consumer on reflect-metadata 0.2 cannot
+          # reach 10.0–10.3.1 either.
+          - { label: '10 floor', spec: '10.3.2' }
+          # 11.0.0 is the oldest graph the 11 line can produce; same
+          # stable-primitives reason. Both floors are pinned exactly so a
+          # downgrade that silently no-ops cannot pass as a floor run.
+          - { label: '11 floor', spec: '11.0.0' }
+          # ^12.0.0 floats, so a new 12.x patch is tested on the next run.
+          - { label: '12', spec: '^12.0.0' }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -210,81 +250,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Pin NestJS to major ${{ matrix.nest-major }}
-        # --legacy-peer-deps: an in-place major downgrade always fights the
-        # installed ^11 peer web (platform-express/testing at the root). This
-        # lane exists to TYPECHECK the adapter against the older typings; peer
-        # strictness during the pin is noise, not signal.
-        run: npm install --no-save --legacy-peer-deps "@nestjs/common@^${{ matrix.nest-major }}" "@nestjs/core@^${{ matrix.nest-major }}"
-
-      - name: Build core (@stalefree/core)
-        run: npm run build --workspace @stalefree/core
-
-      - name: Typecheck adapter against NestJS ${{ matrix.nest-major }}
-        run: npm run typecheck --workspace @nest-native/cache
-
-  nestjs-latest-major:
-    name: NestJS 12 compatibility (Node 22)
-    runs-on: ubuntu-latest
-    # The adapter's published peer range is ^10 || ^11 || ^12, but the
-    # devDependencies and the lockfile every other job installs stay on 11.x so
-    # the default suite keeps testing the older end. This leg installs 12 on
-    # top of that lockfile with --no-save and runs the adapter typecheck and
-    # both suites, which makes the 12 end of the range a tested claim rather
-    # than an assumption. --workspaces --include-workspace-root is load-
-    # bearing even though only the root declares @nestjs/*: a root-only
-    # install (--workspace-root) fails ERESOLVE, because npm swaps the four
-    # peer-linked packages one at a time inside the 11 tree and trips over
-    # platform-express@11 still peering on core@^11; declaring the specs from
-    # every workspace too makes npm re-resolve the set as a whole (verified
-    # locally on a fresh `npm ci` tree, 2026-09-06). The proof step below
-    # fails on a nested 11 instead of passing silently. The sample is bare
-    # Express with no @nestjs/* anywhere (the neutrality proof), so it has
-    # nothing to say about 12 and is not part of this leg. This job replaced
-    # the informational 12-alpha canary once 12 went stable (2026-08-27); it
-    # has no continue-on-error, so unlike the canary a 12 breakage fails the
-    # run. Node 22 here resolves to the newest 22.x, above NestJS 12's own
-    # floor of 22.12 (its require(esm) requirement, which the @nestjs/*
-    # engines field — ">= 20" — does not encode).
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install NestJS 12 (this job only, never saved)
+      - name: Install NestJS ${{ matrix.nest.label }} (this job only, never saved)
         run: |
           npm install --no-save --workspaces --include-workspace-root \
-            @nestjs/common@^12.0.0 \
-            @nestjs/core@^12.0.0 \
-            @nestjs/platform-express@^12.0.0 \
-            @nestjs/testing@^12.0.0
+            "@nestjs/common@${{ matrix.nest.spec }}" \
+            "@nestjs/core@${{ matrix.nest.spec }}" \
+            "@nestjs/platform-express@${{ matrix.nest.spec }}" \
+            "@nestjs/testing@${{ matrix.nest.spec }}"
 
-      - name: Prove the adapter resolves NestJS 12
-        # NestJS 12 does not export ./package.json, so the version is read next
-        # to the resolved entry point, from inside the adapter workspace.
-        run: |
-          cd packages/nestjs && node -e "
-            const path = require('node:path');
-            const root = path.dirname(require.resolve('@nestjs/core'));
-            const { version } = require(path.join(root, 'package.json'));
-            console.log(process.cwd(), '@nestjs/core', version, '<-', root);
-            if (!version.startsWith('12.')) process.exit(1);
-          "
+      - name: Prove every workspace resolves NestJS ${{ matrix.nest.label }}
+        run: node scripts/check-nestjs-resolution.mjs "${{ matrix.nest.spec }}"
 
       - name: Build core (@stalefree/core)
         run: npm run build --workspace @stalefree/core
 
-      - name: Typecheck adapter against NestJS 12
+      - name: Typecheck adapter against NestJS ${{ matrix.nest.label }}
         run: npm run typecheck --workspace @nest-native/cache
 
-      - name: Run core tests against NestJS 12
+      - name: Run core tests against NestJS ${{ matrix.nest.label }}
         run: npm test
 
-      - name: Run adapter tests against NestJS 12
+      - name: Run adapter tests against NestJS ${{ matrix.nest.label }}
         run: npm run test:nestjs
 
   release-and-security:

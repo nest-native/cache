@@ -34,6 +34,17 @@ CI, docs, and Dependabot only — no package change; both packages remain at
 - **Both supported Node majors run the suites.** The tests/coverage lane that
   still carried its `(Node 20)` name from before the Node 20 sunset now runs
   on Node 24; until now 24 only got the build/typecheck matrix.
+- **Every end of the peer range is now a CI leg, with the floors pinned and
+  explained.** The `nestjs-latest-major` leg above and the typecheck-only
+  10/11 matrix (which pinned with `--legacy-peer-deps`) are replaced by one
+  `nestjs-compat` matrix: `10 floor` pinned exactly to `10.3.2` (the first
+  10.x whose `reflect-metadata` peer admits the `^0.2` this repo pins),
+  `11 floor` pinned exactly to `11.0.0`, and `12` on `^12.0.0`, each running
+  the adapter typecheck and both suites with no peer suppression.
+  `scripts/check-nestjs-resolution.mjs` proves the exact version from inside
+  every workspace and checks every peer range in the NestJS ecosystem
+  against the final tree; it also runs against the lockfile in
+  `release:check`. No published range changed.
 
 ## 0.1.0 - 2026-07-19
 

@@ -98,7 +98,7 @@ bare-Express sample lives in [`sample/`](sample/00-express-two-instances)
 - `npm run test:nestjs` — the adapter's own suite; the enforced coverage gate measures `@stalefree/core`, the thin DI shell is exercised here
 - `npm run infra:up && npm run test:full` — adds gated round-trips against real Postgres + MySQL (Docker, local-only)
 - `npm run sample` — the two-process invalidation smoke
-- CI adds a NestJS 12 compatibility leg (`nestjs-latest-major`): `@nestjs/*@^12` installed on top of the 11.x lockfile with `--no-save`, then the adapter typecheck and both suites again
+- CI adds a NestJS compatibility matrix (`nestjs-compat`): every end of the adapter's peer range — `10.3.2` and `11.0.0` pinned exactly, with the reasons next to the pins, and `^12` — installed on top of the 11.x lockfile with `--no-save`, every workspace proven to resolve exactly that with every NestJS-ecosystem peer range satisfied, then the adapter typecheck and both suites again
 - The binding constitution is [GUIDELINES_NEST_CACHE.md](GUIDELINES_NEST_CACHE.md); `main` is PR-only
 
 MIT licensed. Part of the [nest-native](https://github.com/nest-native) family.
