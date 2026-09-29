@@ -233,6 +233,15 @@ over `@authlock/core`.
 - Never log cached values or loader arguments; keys/tags only.
 - The `security:audit` release gate audits the packed tarball's production
   closure (`"dependencies": {}` ⇒ exactly what consumers install).
+- The docs site (`website/`) is never published, so its advisories do not
+  gate releases, but `security:audit` reports them (`security:audit:docs:soft`)
+  because nothing else does: Dependabot alerts showed none of the 32 an
+  `npm audit` of `website/` found on 2026-09-29 (7 high), and version updates
+  bump direct dependencies only. Fix them when a fix exists. `audit fix` cleared
+  the fixable ones; the rest came from `uuid` < 11.1.1 under `sockjs` (the dev
+  server only), which `website/package.json` overrides to `^11.1.1` — `sockjs`
+  calls only `uuid.v4()`, which 11.x keeps in CommonJS. Drop the override once
+  Docusaurus's own chain moves past it.
 
 ### 6. Release version synchronization (MANDATORY)
 
