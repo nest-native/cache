@@ -31,7 +31,7 @@
     "release:check": "npm run release:check:readme-links && npm run release:check:sample-versions && npm run release:check:nestjs-resolution && npm run release:check:pack && npm run release:check:consumer",
     "security:audit:package": "node scripts/audit-production-surface.mjs",
     "security:audit:docs": "npm --prefix website audit --audit-level=high",
-    "security:audit:docs:soft": "npm run security:audit:docs || node -e \"console.log('\\\\n[non-blocking] Docs-site advisories reported above. They live in the website/ tree, which is never published to consumers, so they do not gate releases \u2014 and nothing else reports them (Dependabot alerts do not cover this tree): fix them when a fix exists.')\"",
+    "security:audit:docs:soft": "npm run security:audit:docs || node -e \"console.log('\\\\n[non-blocking] Docs-site advisories reported above. They live in the website/ tree, which is never published to consumers, so they do not gate releases \u2014 and Dependabot alerts do not reliably report them: fix them when a fix exists.')\"",
     "security:audit": "npm run security:audit:package && npm run security:audit:docs:soft",
     "ci": "npm run typecheck && npm run test:cov && npm run test:nestjs && npm run complexity:check && npm run complexity:report && npm run release:check && npm run security:audit",
     "infra:up": "docker compose up -d --wait",
