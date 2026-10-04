@@ -209,7 +209,7 @@ over `@authlock/core`.
 ### 4. Non-negotiable style
 
 - 100% test coverage (branches/functions/lines/statements) on the **core**
-  package; SonarJS cognitive complexity ≤ 15 per function on the core.
+  package; cognitive complexity ≤ 15 per function on the core (Biome, `biome.json`).
 - The **adapter** is a thin DI shell, tested pragmatically (the lockout
   precedent), with the `nestjs-compat` matrix that runs it for real on every
   end of the peer range — 10.3.2, 11.0.0 and `^12` — and fails the run on a
