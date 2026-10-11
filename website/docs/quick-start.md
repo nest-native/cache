@@ -130,7 +130,7 @@ For a store and a bus, build them at bootstrap and hand them over via
 
 ```ts
 CacheModule.forRootAsync({
-  inject: [getDrizzleClientToken()],
+  inject: [getDrizzleToken()], // from @nestjs/drizzle
   useFactory: (db: AppDatabase) => ({
     defaultTtlMs: 30_000,
     store: new PostgresCacheStore(db, cacheTable), // optional shared L2
