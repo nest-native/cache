@@ -9,6 +9,6 @@
   },
   "dependencies": {
     "@stalefree/core": "0.1.0",
-    "express": "^5.1.0"
+    "express": "^5.3.0"
   }
 }
