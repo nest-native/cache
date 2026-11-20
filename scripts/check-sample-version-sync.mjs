@@ -8,11 +8,9 @@ const repoRoot = process.cwd();
 const packageName = '@stalefree/core';
 const samplePackagePaths = collectSamplePackagePaths();
 
-// The cache repo has no sample/ workspaces yet — skip gracefully until the
-// sample matrix lands.
 if (samplePackagePaths.length === 0) {
-  console.log('No sample workspaces yet — skipping sample version sync.');
-  process.exit(0);
+  console.error('No sample workspaces found under sample/: the version sync has nothing to prove.');
+  process.exit(1);
 }
 
 const packageJson = readJson('packages/core/package.json');

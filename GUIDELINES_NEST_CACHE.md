@@ -265,6 +265,13 @@ over `@authlock/core`.
   bootstrap (`NPM_CONFIG_USERCONFIG=~/.npmrc-oss-general`) because npm cannot
   OIDC-publish a brand-new package — the authlock lesson. The npm org
   **stalefree** must exist before C5.
+- **A release ends with the published check.** Once the registry serves both
+  new versions, `release.yml` runs `npm run release:check:published` against
+  `@stalefree/core`. That check and `release:check:consumer` share one
+  cold-consumer smoke, `scripts/consumer-smoke.mjs`; change it there, never
+  inside either check. The published check's sample phase runs each sample's
+  `smoke` script against the published core, and CI runs the sample
+  (`npm run sample`) on every PR against the local build.
 - **Governance:** local-first (direct commits to `main`, no branch protection)
   until `@nest-native/cache` 0.1.0 is published AND dogfooded in the
   reference-app; then switch `main` to PR-only + branch protection, matching

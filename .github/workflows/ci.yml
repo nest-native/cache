@@ -97,6 +97,11 @@ jobs:
       - name: Run adapter tests
         run: npm run test:nestjs
 
+      # The neutrality proof: two bare-Express processes, no @nestjs/*
+      # anywhere, kept coherent by the socket bus.
+      - name: Run the two-process Express sample
+        run: npm run sample
+
       - name: Enforce cognitive complexity threshold
         run: npm run complexity:check
 

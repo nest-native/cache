@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { writeConsumerSmoke } from './consumer-smoke.mjs';
 
 const npmExecutable = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const nodeExecutable = process.execPath;
@@ -38,7 +39,11 @@ function verifyRegistryVersion() {
       env: npmEnv(),
     },
   );
-  const registryInfo = JSON.parse(rawOutput);
+  const registryView = JSON.parse(rawOutput);
+  // npm 12 prints the fields inside an array; npm 10 and 11 print them bare.
+  const registryInfo = Array.isArray(registryView)
+    ? registryView[0]
+    : registryView;
 
   if (registryInfo.version !== version) {
     throw new Error(
@@ -69,7 +74,11 @@ function packPublishedArtifact() {
       env: npmEnv(),
     },
   );
-  const [packResult] = JSON.parse(rawOutput);
+  const packOutput = JSON.parse(rawOutput);
+  // npm 12 keys the payload by package name; npm 10 and 11 print an array.
+  const packResult = Array.isArray(packOutput)
+    ? packOutput[0]
+    : packOutput[packageName];
 
   if (!packResult?.filename || !Array.isArray(packResult.files)) {
     throw new Error('npm pack did not return the expected published artifact payload.');
@@ -91,7 +100,7 @@ function runPublishedConsumerSmoke() {
   const consumerRoot = path.join(tempRoot, 'consumer');
   fs.mkdirSync(consumerRoot);
   writeConsumerPackage(consumerRoot);
-  writeConsumerSmoke(consumerRoot);
+  writeConsumerSmoke(consumerRoot, { packageName, origin: 'published' });
 
   execFileSync(
     npmExecutable,
@@ -134,50 +143,24 @@ function writeConsumerPackage(consumerRoot) {
   );
 }
 
-function writeConsumerSmoke(consumerRoot) {
-  fs.writeFileSync(
-    path.join(consumerRoot, 'smoke.cjs'),
-    `'use strict';
-
-const assert = require('node:assert/strict');
-const core = require('${packageName}');
-const packageJson = require('${packageName}/package.json');
-
-// The documented public surface resolves from the registry install.
-assert.ok(core && typeof core === 'object', 'core entry point must load');
-
-// The published package declares zero runtime dependencies.
-assert.equal(
-  Object.keys(packageJson.dependencies ?? {}).length,
-  0,
-  'The published package must not declare runtime dependencies.',
-);
-`,
-  );
-}
-
 function runPublishedSampleSmoke() {
-  // The cache repo has no sample/ workspaces yet — skip gracefully until the
-  // sample matrix lands.
   if (!fs.existsSync(path.join(repoRoot, 'sample'))) {
-    console.log('No sample/ directory yet — skipping published sample validation.');
-    return;
+    throw new Error('sample/ is missing: the published check proves registry consumption through the samples.');
   }
 
   const sampleWorkspace = path.join(tempRoot, 'samples');
   fs.mkdirSync(sampleWorkspace);
 
   writeSampleWorkspacePackage(sampleWorkspace);
+  // Sources only: npm takes a dependency it finds in a copied node_modules as
+  // installed, and then skips that dependency's own dependencies.
   fs.cpSync(path.join(repoRoot, 'sample'), path.join(sampleWorkspace, 'sample'), {
     recursive: true,
+    filter: source => path.basename(source) !== 'node_modules',
   });
   const pinnedSamples = pinSampleDependencies(
     path.join(sampleWorkspace, 'sample'),
   );
-  fs.cpSync(path.join(repoRoot, 'scripts'), path.join(sampleWorkspace, 'scripts'), {
-    recursive: true,
-    filter: source => !source.includes(`${path.sep}node_modules${path.sep}`),
-  });
   fs.copyFileSync(
     path.join(repoRoot, 'tsconfig.base.json'),
     path.join(sampleWorkspace, 'tsconfig.base.json'),
@@ -214,7 +197,10 @@ function runPublishedSampleSmoke() {
     );
   }
 
-  execFileSync(npmExecutable, ['run', 'ci:sample'], {
+  // Each sample's own `smoke` script: the smoke.cjs that `npm run sample` runs
+  // in CI against the local build, here against the pinned registry version.
+  // npm fails on a sample without one.
+  execFileSync(npmExecutable, ['run', 'smoke', '--workspaces'], {
     cwd: sampleWorkspace,
     stdio: 'inherit',
     env: npmEnv(),
@@ -297,13 +283,6 @@ function writeSampleWorkspacePackage(sampleWorkspace) {
         name: 'stalefree-core-published-samples',
         private: true,
         workspaces: ['sample/*'],
-        scripts: {
-          showcase:
-            'node scripts/run-optional-workspace.cjs stalefree-core-showcase test',
-          'sample:focused': 'node scripts/run-focused-samples.mjs',
-          sample: 'npm run showcase && npm run sample:focused',
-          'ci:sample': 'npm run sample',
-        },
       },
       null,
       2,
