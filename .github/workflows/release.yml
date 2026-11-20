@@ -69,3 +69,23 @@ jobs:
           else
             npm publish --workspace @nest-native/cache --provenance --access public
           fi
+
+      # release:check:published installs from the registry, which can serve a
+      # version some time after its publish returns, so this step first waits
+      # until `npm view` sees both: every 15 s, for up to 10 minutes.
+      - name: Check the published release
+        run: |
+          CORE_VERSION="$(node -p "require('./packages/core/package.json').version")"
+          ADAPTER_VERSION="$(node -p "require('./packages/nestjs/package.json').version")"
+          WAITED=0
+          until npm view "@stalefree/core@${CORE_VERSION}" version >/dev/null 2>&1 &&
+            npm view "@nest-native/cache@${ADAPTER_VERSION}" version >/dev/null 2>&1; do
+            if [ "${WAITED}" -ge 600 ]; then
+              echo "::error::@stalefree/core@${CORE_VERSION} and @nest-native/cache@${ADAPTER_VERSION} were not both on the registry 10 minutes after publishing, so release:check:published did not run."
+              exit 1
+            fi
+            echo "Waiting for the registry to serve @stalefree/core@${CORE_VERSION} and @nest-native/cache@${ADAPTER_VERSION} (${WAITED} s so far)."
+            sleep 15
+            WAITED=$((WAITED + 15))
+          done
+          npm run release:check:published

@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { writeConsumerSmoke } from './consumer-smoke.mjs';
 
 const npmExecutable = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const nodeExecutable = process.execPath;
@@ -17,7 +18,10 @@ try {
 
   const tarballPath = packTarball();
   writeConsumerPackage(tarballPath);
-  writeConsumerSmoke();
+  writeConsumerSmoke(consumerRoot, {
+    packageName: '@stalefree/core',
+    origin: 'packed',
+  });
 
   execFileSync(
     npmExecutable,
@@ -93,34 +97,5 @@ function writeConsumerPackage(tarballPath) {
       null,
       2,
     )}\n`,
-  );
-}
-
-function writeConsumerSmoke() {
-  fs.writeFileSync(
-    path.join(consumerRoot, 'smoke.cjs'),
-    `'use strict';
-
-const assert = require('node:assert/strict');
-const core = require('@stalefree/core');
-const packageJson = require('@stalefree/core/package.json');
-
-// The main entry resolves and loads from the packed tarball with nothing but
-// the tarball installed — importing '@stalefree/core' above already proves the
-// core pulls NO drizzle-orm and NO pg by default.
-assert.ok(core && typeof core === 'object', 'core entry point must load');
-
-// As the engine lands, extend this smoke with the documented public surface
-// (StalefreeCache, ...) and the store/bus subpath exports
-// (./socket, ./postgres, ./sqlite, ./mysql), mirroring the lockout template.
-
-// The published package declares zero runtime dependencies (consumers only pull
-// the OPTIONAL drizzle-orm / pg peers if they use a store or bus subpath).
-assert.equal(
-  Object.keys(packageJson.dependencies ?? {}).length,
-  0,
-  'The packed package must not declare runtime dependencies.',
-);
-`,
   );
 }
